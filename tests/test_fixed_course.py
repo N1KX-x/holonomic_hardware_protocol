@@ -2,6 +2,7 @@ import math
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import config
 from hardware.collector import latest_sample, safety_problem
@@ -23,9 +24,12 @@ class FixedCourseTests(unittest.TestCase):
         self.assertEqual((first.start_x, first.goal_x), (second.start_x, second.goal_x))
         self.assertNotEqual(first.obstacles, second.obstacles)
 
-    def test_planned_path_starts_from_fixed_start(self):
-        problem = sample_problem(1, config.MASTER_RANDOM_SEED + 10000, 0.2)
-        self.assertIsNotNone(plan_candidate(problem, config.MASTER_RANDOM_SEED + 10001, 0.2))
+    def test_course_is_plannable_with_enough_segments(self):
+        # Long horizon, so this checks the course geometry rather than T_SEGMENTS.
+        with mock.patch.object(config, "T_SEGMENTS", 12):
+            problem = sample_problem(1, config.MASTER_RANDOM_SEED + 10000, 0.2)
+            plan = plan_candidate(problem, config.MASTER_RANDOM_SEED + 10001, 0.2)
+        self.assertIsNotNone(plan)
 
 
 class SafetyStopTests(unittest.TestCase):

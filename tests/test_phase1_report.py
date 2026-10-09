@@ -67,6 +67,9 @@ class Phase1ReportTests(unittest.TestCase):
             mock.patch.object(config, "CANDIDATES_PER_INSTANCE", 2),
             mock.patch.object(config, "REQUIRE_OPERATOR_CONFIRMATION", False),
             mock.patch.object(config, "AUTONOMOUS_RESET_ENABLED", False),
+            # Synthetic data has no marker offset, whatever the lab calibration is.
+            mock.patch.multiple(config, YAW_OFFSET_RAD=0.0, MARKER_TO_BODY_X_M=0.0,
+                                MARKER_TO_BODY_Y_M=0.0),
             mock.patch.object(main, "PLAN_ROOT", root / "plans"),
             mock.patch.object(main, "RAW_ROOT", root / "raw"),
             mock.patch.object(main, "VALIDATION_CSV", root / "collection_validation.csv"),

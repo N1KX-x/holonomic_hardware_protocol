@@ -97,7 +97,7 @@ ROBOT_RADIUS_M = 0.30
 
 # Nominal model and command limits ------------------------------------------
 DT_S = 2.0
-T_SEGMENTS = 6
+T_SEGMENTS = 20
 VX_MAX_MPS = 0.5
 VY_MAX_MPS = 0.5
 OMEGA_MAX_RADPS = 1.0

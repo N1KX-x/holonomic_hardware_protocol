@@ -3,6 +3,7 @@ import math
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import config
 from core import (Command, load_candidate_csv, process_execution, step_holonomic,
@@ -49,12 +50,10 @@ class CoreTests(unittest.TestCase):
                 writer.writerow([10.5, 5.25, 3.0, 0.0, 1])
                 writer.writerow([11.5, 5.75, 3.0, 0.0, 1])
                 writer.writerow([12.5, 6.25, 3.0, 0.0, 1])
-            old_gap = config.MAX_TRACKING_GAP_S
-            config.MAX_TRACKING_GAP_S = 2.0
-            try:
+            # Synthetic data has no marker offset, whatever the lab calibration is.
+            with mock.patch.multiple(config, MAX_TRACKING_GAP_S=2.0, YAW_OFFSET_RAD=0.0,
+                                     MARKER_TO_BODY_X_M=0.0, MARKER_TO_BODY_Y_M=0.0):
                 metric = process_execution(run, "test", config)
-            finally:
-                config.MAX_TRACKING_GAP_S = old_gap
         self.assertAlmostEqual(metric.initial_x_m, 5.0)
         self.assertAlmostEqual(metric.initial_y_m, 3.0)
         self.assertAlmostEqual(metric.max_deviation_m, 0.0)
