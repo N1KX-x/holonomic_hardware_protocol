@@ -74,7 +74,7 @@ MOCAP_GROUND_Y_SIGN = -1.0
 
 
 # Measured calibration (replace after Phase 0) ------------------------------
-YAW_OFFSET_RAD = 0.0
+YAW_OFFSET_RAD = 2.3791015571453276
 MARKER_TO_BODY_X_M = 0.0
 MARKER_TO_BODY_Y_M = 0.0
 POSITIVE_YAW_COMMAND_SIGN = 1.0
@@ -98,8 +98,8 @@ ROBOT_RADIUS_M = 0.30
 # Nominal model and command limits ------------------------------------------
 DT_S = 2.0
 T_SEGMENTS = 6
-VX_MAX_MPS = 1.0
-VY_MAX_MPS = 1.0
+VX_MAX_MPS = 0.5
+VY_MAX_MPS = 0.5
 OMEGA_MAX_RADPS = 1.0
 # Optional combined translational limit. Set None if the interface has none.
 TRANSLATIONAL_SPEED_MAX_MPS = None
