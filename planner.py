@@ -15,7 +15,7 @@ import random
 from dataclasses import dataclass
 
 import config
-from core import Command, step_holonomic, wrap_angle
+from core import Command, nominal_step, wrap_angle
 
 
 @dataclass(frozen=True)
@@ -68,7 +68,7 @@ def _command_is_free(start, vx: float, vy: float, omega: float,
     samples = max(1, math.ceil(path_length_bound / config.RRT_COLLISION_SAMPLE_SPACING_M))
     for index in range(samples + 1):
         elapsed = config.DT_S * index / samples
-        x, y, _ = step_holonomic(*start, vx, vy, omega, elapsed)
+        x, y, _ = nominal_step(*start, Command(0, vx, vy, omega, config.DT_S), config, elapsed)
         if not _point_is_free(x, y, obstacles, rho):
             return False
     return True
@@ -186,7 +186,7 @@ def plan_candidate(problem: Problem, seed: int, rho: float) -> list[Command] | N
         best = None
         for _ in range(config.RRT_CONTROL_SAMPLES_PER_EXPANSION):
             vx, vy, omega = _sample_control(rng)
-            nxt = step_holonomic(*nearest.state, vx, vy, omega, config.DT_S)
+            nxt = nominal_step(*nearest.state, Command(0, vx, vy, omega, config.DT_S), config)
             if not _command_is_free(nearest.state, vx, vy, omega,
                                     problem.obstacles, rho):
                 continue

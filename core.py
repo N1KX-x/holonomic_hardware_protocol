@@ -70,6 +70,14 @@ def step_holonomic(
     )
 
 
+def nominal_step(x: float, y: float, theta: float, command: Command, cfg,
+                 duration: float | None = None) -> tuple[float, float, float]:
+    """Nominal model: the exact holonomic step with the calibrated command gains."""
+    return step_holonomic(x, y, theta, cfg.MODEL_GAIN_VX*command.vx,
+                          cfg.MODEL_GAIN_VY*command.vy, cfg.MODEL_GAIN_OMEGA*command.omega,
+                          command.dt if duration is None else duration)
+
+
 def validate_commands(commands: Iterable[Command], cfg, require_main_horizon: bool = True) -> list[Command]:
     result = list(commands)
     if not result:
@@ -127,13 +135,13 @@ def load_sent_commands(path: Path) -> list[Command]:
     return commands
 
 
-def nominal_boundaries(commands: list[Command], initial_pose: tuple[float, float, float]):
+def nominal_boundaries(commands: list[Command], initial_pose: tuple[float, float, float], cfg):
     times = [commands[0].t_send]
     states = [initial_pose]
     state = initial_pose
     elapsed = 0.0
     for command in commands:
-        state = step_holonomic(*state, command.vx, command.vy, command.omega, command.dt)
+        state = nominal_step(*state, command, cfg)
         elapsed += command.dt
         times.append(commands[0].t_send + elapsed)
         states.append(state)
@@ -227,7 +235,7 @@ def trace_execution(run_dir: Path, cfg) -> ExecutionTrace:
             raise ValueError("Tracking gap exceeds MAX_TRACKING_GAP_S")
     initial = (_interp(t0, times, body_x), _interp(t0, times, body_y),
                _interp(t0, times, theta))
-    boundary_times, nominal = nominal_boundaries(commands, initial)
+    boundary_times, nominal = nominal_boundaries(commands, initial, cfg)
     actual = [(_interp(t, times, body_x), _interp(t, times, body_y)) for t in boundary_times]
     points = [actual[0]] + [(x, y) for t, x, y in zip(times, body_x, body_y) if t0 < t < tf] + [actual[-1]]
     return ExecutionTrace(commands, initial, nominal, actual, points)

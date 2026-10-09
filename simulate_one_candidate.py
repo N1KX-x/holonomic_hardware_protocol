@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Circle as CirclePatch
 
 import config
-from core import process_execution, step_holonomic
+from core import nominal_step, process_execution
 from planner import plan_candidate, sample_problem
 
 
@@ -30,7 +30,7 @@ def state_at(commands, initial, elapsed):
     remaining = max(0.0, elapsed)
     for command in commands:
         duration = min(command.dt, remaining)
-        state = step_holonomic(*state, command.vx, command.vy, command.omega, duration)
+        state = nominal_step(*state, command, config, duration)
         remaining -= duration
         if remaining <= 1e-12:
             break

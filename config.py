@@ -103,6 +103,12 @@ VY_MAX_MPS = 0.5
 OMEGA_MAX_RADPS = 1.0
 # Optional combined translational limit. Set None if the interface has none.
 TRANSLATIONAL_SPEED_MAX_MPS = None
+# Calibrated nominal model (protocol open item 4): the model predicts the robot
+# achieving these fractions of each commanded velocity. Measured from the
+# single-axis Phase 0 pilots (attempt 3). Set all to 1.0 for the raw model.
+MODEL_GAIN_VX = 0.99
+MODEL_GAIN_VY = 0.90
+MODEL_GAIN_OMEGA = 0.77
 
 
 # Planning ------------------------------------------------------------------
@@ -208,6 +214,10 @@ def validate() -> None:
     if EDGE_STOP_MARGIN_M is not None and not (
             isinstance(EDGE_STOP_MARGIN_M, (int, float)) and EDGE_STOP_MARGIN_M >= 0):
         raise ValueError("EDGE_STOP_MARGIN_M must be None or a non-negative number")
+    for name in ("MODEL_GAIN_VX", "MODEL_GAIN_VY", "MODEL_GAIN_OMEGA"):
+        value = globals()[name]
+        if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+            raise ValueError(f"{name} must be finite and positive")
     safety_positive = {
         "LIVE_TRACKING_TIMEOUT_S": LIVE_TRACKING_TIMEOUT_S,
         "START_POSITION_TOLERANCE_M": START_POSITION_TOLERANCE_M,

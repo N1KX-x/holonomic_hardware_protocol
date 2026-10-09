@@ -38,9 +38,14 @@ class SafetyStopTests(unittest.TestCase):
         y = (config.WORKSPACE_Y_MIN_M + config.WORKSPACE_Y_MAX_M) / 2
         self.assertIsNone(safety_problem(x, y, 0.0))
 
-    def test_near_edge_stops(self):
-        x = config.WORKSPACE_X_MAX_M - config.EDGE_STOP_MARGIN_M / 2
-        self.assertIn("workspace edge", safety_problem(x, 0.0, 0.0))
+    def test_near_edge_stops_when_enabled(self):
+        with mock.patch.object(config, "EDGE_STOP_MARGIN_M", 0.3):
+            x = config.WORKSPACE_X_MAX_M - 0.15
+            self.assertIn("workspace edge", safety_problem(x, 0.0, 0.0))
+
+    def test_edge_stop_can_be_turned_off(self):
+        with mock.patch.object(config, "EDGE_STOP_MARGIN_M", None):
+            self.assertIsNone(safety_problem(config.WORKSPACE_X_MAX_M + 5.0, 0.0, 0.0))
 
     def test_latest_sample_skips_partial_last_line(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -18,7 +18,7 @@ import json
 from pathlib import Path
 
 import config
-from core import ExecutionTrace, load_candidate_csv, step_holonomic, trace_execution
+from core import ExecutionTrace, load_candidate_csv, nominal_step, trace_execution
 
 
 SAMPLES_PER_SEGMENT = 20
@@ -35,10 +35,10 @@ def _dense_path(commands, start):
     state = start
     for command in commands:
         for index in range(1, SAMPLES_PER_SEGMENT + 1):
-            x, y, _ = step_holonomic(*state, command.vx, command.vy, command.omega,
-                                     command.dt*index/SAMPLES_PER_SEGMENT)
+            x, y, _ = nominal_step(*state, command, config,
+                                   command.dt*index/SAMPLES_PER_SEGMENT)
             points.append((x, y))
-        state = step_holonomic(*state, command.vx, command.vy, command.omega, command.dt)
+        state = nominal_step(*state, command, config)
         boundaries.append(state[:2])
     return points, boundaries
 
