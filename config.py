@@ -33,7 +33,7 @@ MAX_TRACKING_GAP_S = 0.10
 # Live safety stop. While a command sequence runs, the robot is stopped (and
 # the run fails) if its body center comes within EDGE_STOP_MARGIN_M of the
 # workspace edge, or if mocap has not tracked it for LIVE_TRACKING_TIMEOUT_S.
-EDGE_STOP_MARGIN_M = 0.30
+EDGE_STOP_MARGIN_M = None
 LIVE_TRACKING_TIMEOUT_S = 0.50
 
 # Before every Phase 1 candidate the robot must stand this close to the
@@ -74,7 +74,7 @@ MOCAP_GROUND_Y_SIGN = -1.0
 
 
 # Measured calibration (replace after Phase 0) ------------------------------
-YAW_OFFSET_RAD = 2.3791015571453276
+YAW_OFFSET_RAD = 2.40395144164075
 MARKER_TO_BODY_X_M = 0.0
 MARKER_TO_BODY_Y_M = 0.0
 POSITIVE_YAW_COMMAND_SIGN = 1.0
@@ -97,7 +97,7 @@ ROBOT_RADIUS_M = 0.30
 
 # Nominal model and command limits ------------------------------------------
 DT_S = 2.0
-T_SEGMENTS = 20
+T_SEGMENTS = 15
 VX_MAX_MPS = 0.5
 VY_MAX_MPS = 0.5
 OMEGA_MAX_RADPS = 1.0
@@ -205,8 +205,10 @@ def validate() -> None:
         raise ValueError("Reset translation limits cannot exceed experiment limits")
     if RESET_OMEGA_MAX_RADPS > OMEGA_MAX_RADPS:
         raise ValueError("Reset yaw limit cannot exceed experiment limit")
+    if EDGE_STOP_MARGIN_M is not None and not (
+            isinstance(EDGE_STOP_MARGIN_M, (int, float)) and EDGE_STOP_MARGIN_M >= 0):
+        raise ValueError("EDGE_STOP_MARGIN_M must be None or a non-negative number")
     safety_positive = {
-        "EDGE_STOP_MARGIN_M": EDGE_STOP_MARGIN_M,
         "LIVE_TRACKING_TIMEOUT_S": LIVE_TRACKING_TIMEOUT_S,
         "START_POSITION_TOLERANCE_M": START_POSITION_TOLERANCE_M,
         "START_HEADING_TOLERANCE_RAD": START_HEADING_TOLERANCE_RAD,

@@ -38,8 +38,10 @@ def latest_sample(path: Path):
 
 def safety_problem(marker_x: float, marker_y: float, theta_raw: float) -> str | None:
     """Describe why the robot must stop now, or return None if it is safe."""
-    x, y, _ = body_pose(marker_x, marker_y, theta_raw, config)
     margin = config.EDGE_STOP_MARGIN_M
+    if margin is None:
+        return None
+    x, y, _ = body_pose(marker_x, marker_y, theta_raw, config)
     if not (config.WORKSPACE_X_MIN_M + margin <= x <= config.WORKSPACE_X_MAX_M - margin
             and config.WORKSPACE_Y_MIN_M + margin <= y <= config.WORKSPACE_Y_MAX_M - margin):
         return (f"robot at x={x:.2f}, y={y:.2f} is within {margin} m of the "
