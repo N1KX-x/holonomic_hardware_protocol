@@ -169,6 +169,13 @@ your decision (the protocol does not say).
        candidates. If anything fails, the whole instance is discarded
        and is NOT rerun; just go back to step a).
 
+       When the instance finishes cleanly, the analysis is updated
+       automatically and the deviation E of each candidate is printed,
+       e.g.  "I047 done: largest E over 5 candidates = 0.183 m".
+       Never discard or rerun an instance because its E looks large or
+       small; only a run that did not complete cleanly is discarded.
+       Choosing instances by their E would bias the dataset.
+
     Repeat until status prints "Next randomized instance: none".
 
 If an instance is ever left with status "collecting" (for example the PC
@@ -178,8 +185,12 @@ problems.csv, and write the reason in data/phase1/notes.txt.
 
 
 ----------------------------------------------------------------------
-4. AFTER COLLECTION - OFFLINE ANALYSIS (no robot needed)
+4. ANALYSIS (no robot needed)
 ----------------------------------------------------------------------
+
+The analysis files are rewritten after every cleanly finished instance,
+so they are always up to date. To rebuild them by hand (for example after
+changing the yaw offset, or if the automatic analysis printed an error):
 
     python3 analyze_phase1.py
 

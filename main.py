@@ -15,6 +15,7 @@ import random
 from pathlib import Path
 
 import config
+from analyze_phase1 import analyze
 from core import process_execution, validate_commands, write_candidate_csv
 from planner import obstacles_json, plan_candidate, sample_problem
 
@@ -210,6 +211,26 @@ def collect(instance_id: str, execute: bool) -> None:
         raise
     finally:
         _replace_problem_rows(rows)
+    # Analysis runs only after the instance is saved as ok, so an analysis
+    # error can never discard data that was collected cleanly.
+    try:
+        report_instance(instance_id)
+    except Exception as error:
+        print(f"{instance_id} is saved as ok, but analysis failed: {error}")
+        print("Run python3 analyze_phase1.py to retry.")
+
+
+def report_instance(instance_id: str) -> None:
+    """Refresh the analysis files and print the deviations of one finished instance."""
+    executions, instances = analyze()
+    finished = [metric for metric in executions
+                if metric.run_id.startswith(f"{instance_id}_C")]
+    for metric in finished:
+        print(f"  {metric.run_id}: E = {metric.max_deviation_m:.3f} m")
+    largest = max(metric.max_deviation_m for metric in finished)
+    print(f"{instance_id} done: largest E over {len(finished)} candidates = {largest:.3f} m")
+    print(f"Analysis updated for {len(instances)} complete instance(s) in "
+          f"{config.PHASE1_ROOT / 'analysis'}")
 
 
 def status() -> None:

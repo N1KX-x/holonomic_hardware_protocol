@@ -95,7 +95,10 @@ the complete instance.
 If any candidate fails, every raw run belonging to that instance is renamed
 with `_discarded` and the instance status becomes `discarded`. It is not rerun.
 
-After collection, offline analysis is:
+After each instance completes cleanly, `collect` reruns the offline analysis
+and prints that instance's per-candidate deviations. The analysis only runs
+after the instance is saved as `ok`, so an analysis error never discards
+collected data. It can also be rerun by hand at any time:
 
 ```bash
 python3 analyze_phase1.py

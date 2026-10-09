@@ -70,10 +70,10 @@ POSITIVE_LATERAL_COMMAND_SIGN = 1.0
 
 
 # Workspace in mocap world coordinates (replace after mapping capture area) --
-WORKSPACE_X_MIN_M = -2.0
-WORKSPACE_X_MAX_M = 2.0
-WORKSPACE_Y_MIN_M = -2.0
-WORKSPACE_Y_MAX_M = 2.0
+WORKSPACE_X_MIN_M = -4.0
+WORKSPACE_X_MAX_M = 4.0
+WORKSPACE_Y_MIN_M = -4.0
+WORKSPACE_Y_MAX_M = 4.0
 
 # Conservative planar footprint radius of the robot. Measure from the robot's
 # body/control center to its furthest occupied point and add any desired fixed
@@ -83,12 +83,12 @@ ROBOT_RADIUS_M = 0.30
 
 # Nominal model and command limits ------------------------------------------
 DT_S = 2.0
-T_SEGMENTS = 8
+T_SEGMENTS = 6
 VX_MAX_MPS = 1.0
 VY_MAX_MPS = 1.0
 OMEGA_MAX_RADPS = 1.0
 # Optional combined translational limit. Set None if the interface has none.
-TRANSLATIONAL_SPEED_MAX_MPS = 0.55
+TRANSLATIONAL_SPEED_MAX_MPS = None
 
 
 # Planning ------------------------------------------------------------------

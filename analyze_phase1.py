@@ -7,10 +7,11 @@ import csv
 import json
 
 import config
-from core import process_execution
+from core import ExecutionMetrics, process_execution
 
 
-def main() -> None:
+def analyze() -> tuple[list[ExecutionMetrics], list[tuple[str, float, str]]]:
+    """Recompute every complete instance and rewrite both analysis CSV files."""
     with config.PROBLEMS_CSV.open(newline="", encoding="utf-8") as source:
         problems = list(csv.DictReader(source))
     output = config.PHASE1_ROOT / "analysis"
@@ -40,6 +41,11 @@ def main() -> None:
         writer = csv.writer(target)
         writer.writerow(["instance", "max_candidate_deviation_m", "candidate_deviations_m"])
         writer.writerows(instances)
+    return executions, instances
+
+
+def main() -> None:
+    executions, instances = analyze()
     print(f"Analyzed {len(executions)} executions across {len(instances)} complete instances")
 
 
