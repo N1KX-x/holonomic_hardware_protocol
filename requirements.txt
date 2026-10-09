@@ -1,0 +1,4 @@
+# Offline planner and CSV processing use only the Python standard library.
+# The optional simulation script uses matplotlib.
+# Hardware collection requires the Nova/ROS 2 environment:
+# rclpy, geometry_msgs, and unitree_go.

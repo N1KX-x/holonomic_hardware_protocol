@@ -1,0 +1,199 @@
+HOW TO RUN THE HOLONOMIC HARDWARE PROTOCOL ON THE TEST PC
+==========================================================
+
+Run every command below from inside the project folder on the test PC:
+
+    cd /path/to/holonomic_hardware_protocol
+
+Nothing needs to be built or installed. The code is plain Python (3.8+).
+ROS is used only through Nova: each collection loads ~/nova/env.bash and
+publishes velocity commands that the Nova Go2 driver forwards to the robot.
+
+
+----------------------------------------------------------------------
+0. ONE-TIME SETUP
+----------------------------------------------------------------------
+
+0.1 Copy this whole folder to the test PC (USB, scp, ...).
+
+0.2 Edit config.py on the test PC:
+
+    NOVA_ENV_FILE        path of Nova's env.bash (default ~/nova/env.bash)
+    MOCAP_CLIENT_IP      the test PC's IP on the mocap network
+    MOCAP_SERVER_IP      the Motive PC's IP
+    RIGID_BODY_ID        the Go2 rigid-body ID in Motive
+    CMD_VEL_TOPIC        topic the Nova driver subscribes to for velocity
+    STOP_TOPIC           topic the Nova driver subscribes to for StopMove
+
+    Experiment values (Phase 0 freezes these; changing them later means
+    redoing Phase 0):
+    DT_S, T_SEGMENTS, VX_MAX_MPS, VY_MAX_MPS, OMEGA_MAX_RADPS,
+    TRANSLATIONAL_SPEED_MAX_MPS, GOAL_RADIUS_M, ROBOT_RADIUS_M,
+    WORKSPACE_X_MIN_M / X_MAX_M / Y_MIN_M / Y_MAX_M
+
+    Recommended for the first runs:
+    REQUIRE_OPERATOR_CONFIRMATION = True
+    (every collect then asks you to type the run/instance ID first)
+
+
+----------------------------------------------------------------------
+1. CHECKS THAT DO NOT MOVE THE ROBOT
+----------------------------------------------------------------------
+
+1.1 Check that Nova provides everything the command sender imports
+    (should print "ok"):
+
+    source ~/nova/env.bash && python3 -c "import rclpy, geometry_msgs.msg, unitree_go.msg; print('ok')"
+
+1.2 Run the unit tests:
+
+    python3 -m unittest discover -s tests -v
+
+1.3 Start the Nova Go2 driver in its own terminal and leave it running.
+    Then, in another terminal where you have run "source ~/nova/env.bash",
+    confirm it is listening (each should show Subscription count >= 1):
+
+    ros2 topic info /cmd_vel_out
+    ros2 topic info /webrtc_req
+
+1.4 Check mocap on its own. Logs the rigid body until Ctrl+C. Move the
+    robot by hand while it runs; in the file, "tracked" should be 1 and
+    x / y should change. Delete the file before running this again.
+
+    python3 -m hardware.mocap_logger ~/mocap_check.csv
+
+
+----------------------------------------------------------------------
+2. PHASE 0 - PIPELINE CHECKS AND DEVIATION PILOT
+----------------------------------------------------------------------
+
+Keep Nova running. Keep someone on the e-stop for every collect.
+
+2.1 Create the Phase 0 plans (no robot motion; run only once):
+
+    python3 phase0.py prepare
+
+2.2 Run the three pipeline tests, one at a time:
+
+    python3 phase0.py collect pipeline_forward --execute
+    python3 phase0.py collect pipeline_arc --execute
+    python3 phase0.py collect pipeline_lateral --execute
+
+2.3 Check the command signs BEFORE any pilot run:
+      - pipeline_arc:     the robot should turn left (counterclockwise)
+      - pipeline_lateral: the robot should step to its own left
+    If either is wrong, flip POSITIVE_YAW_COMMAND_SIGN or
+    POSITIVE_LATERAL_COMMAND_SIGN in config.py, delete that run's folder
+    in data/phase0/raw/, and collect it again.
+
+2.4 Get the yaw offset:
+
+    python3 phase0.py summarize
+
+    Status will be "pending" at this point; that is expected.
+    Copy yaw_offset_estimate_rad from data/phase0/phase0_results.csv into
+    YAW_OFFSET_RAD in config.py. Also enter the measured marker-to-body
+    offset in MARKER_TO_BODY_X_M and MARKER_TO_BODY_Y_M.
+
+2.5 Inspect the pipeline runs (plot data/phase0/raw/<run>/mocap.csv against
+    the nominal path). Then open data/phase0/pipeline_review.csv and change
+    all six statuses from "pending" to "pass":
+    pipeline_forward, pipeline_arc, pipeline_lateral,
+    clock_sync, yaw_sign, lateral_sign
+
+2.6 Run the 15 pilot runs. Some travel up to ~3 m from where they start,
+    so begin each one near the middle of the capture area.
+
+    python3 phase0.py collect pilot_vx_only_01 --execute
+    python3 phase0.py collect pilot_vx_only_02 --execute
+    python3 phase0.py collect pilot_vx_only_03 --execute
+    python3 phase0.py collect pilot_vy_only_01 --execute
+    python3 phase0.py collect pilot_vy_only_02 --execute
+    python3 phase0.py collect pilot_vy_only_03 --execute
+    python3 phase0.py collect pilot_omega_only_01 --execute
+    python3 phase0.py collect pilot_omega_only_02 --execute
+    python3 phase0.py collect pilot_omega_only_03 --execute
+    python3 phase0.py collect pilot_mixed_01 --execute
+    python3 phase0.py collect pilot_mixed_02 --execute
+    python3 phase0.py collect pilot_mixed_03 --execute
+    python3 phase0.py collect pilot_mixed_04 --execute
+    python3 phase0.py collect pilot_mixed_05 --execute
+    python3 phase0.py collect pilot_mixed_06 --execute
+
+2.7 Summarize again:
+
+    python3 phase0.py summarize
+
+    Phase 0 is done when data/phase0/phase0_results.csv says "ready".
+    If it says "pending", read its "failures" column.
+    If rho_m is not smaller than goal_radius_m, the protocol's options are
+    a shorter T, lower speeds, or a larger goal radius. Any of these means
+    running Phase 0 again in a fresh data folder.
+
+If a Phase 0 collect fails, its folder stays and collect will not
+overwrite it. If that folder has no commands.csv, or commands.csv has only
+its header row, no motion command was sent; you can delete the folder and
+collect again. Otherwise the robot moved, and whether to rerun that run is
+your decision (the protocol does not say).
+
+
+----------------------------------------------------------------------
+3. PHASE 1 - MAIN COLLECTION
+----------------------------------------------------------------------
+
+3.1 Check that config.py still matches the Phase 0 result:
+
+    python3 main.py validate
+
+3.2 Plan every instance (no robot motion; run only once):
+
+    python3 main.py prepare
+
+3.3 Repeat for every instance:
+
+    a) Ask which instance is next (instances run in a random order):
+
+       python3 main.py status
+
+       The last line prints e.g. "Next randomized instance: I047".
+
+    b) Walk the robot to that instance's start: look up start_x and
+       start_y in data/phase1/problems.csv, and face the robot along
+       world +x.
+
+    c) Collect all candidates of that instance (use the ID from step a):
+
+       python3 main.py collect I047 --execute
+
+       The robot is returned to the start automatically between
+       candidates. If anything fails, the whole instance is discarded
+       and is NOT rerun; just go back to step a).
+
+    Repeat until status prints "Next randomized instance: none".
+
+If an instance is ever left with status "collecting" (for example the PC
+was shut down mid-run), treat it as discarded: add "_discarded" to its
+folder names in data/phase1/raw/, set its status to "discarded" in
+problems.csv, and write the reason in data/phase1/notes.txt.
+
+
+----------------------------------------------------------------------
+4. AFTER COLLECTION - OFFLINE ANALYSIS (no robot needed)
+----------------------------------------------------------------------
+
+    python3 analyze_phase1.py
+
+Results are written to data/phase1/analysis/:
+    execution_metrics.csv   deviation E for every run
+    instance_metrics.csv    largest E across the candidates of each instance
+
+
+----------------------------------------------------------------------
+KNOWN LIMITATIONS (fix before Phase 1 if possible)
+----------------------------------------------------------------------
+
+- A failed autonomous return between candidates discards the whole
+  instance, which drops long start-to-goal problems more often.
+- Nothing detects the robot leaving the workspace during a run; watch for
+  it and stop the run (Ctrl+C) if it happens. That discards the instance.
+- The start pose is not checked; place the robot carefully in step 3.3 b).

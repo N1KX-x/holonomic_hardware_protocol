@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+
+# Experiment output (written on the test PC; remove this line to version it)
+data/
+simulation_output/
+
+# OptiTrack NatNet SDK files are under OptiTrack's EULA. Uncomment the next
+# line if this repository is public, and copy them into vendor/ by hand.
+# vendor/
