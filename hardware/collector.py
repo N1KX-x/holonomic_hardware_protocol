@@ -12,7 +12,39 @@ import time
 from pathlib import Path
 
 import config
-from core import load_candidate_csv, validate_commands
+from core import body_pose, load_candidate_csv, validate_commands
+
+
+def latest_sample(path: Path):
+    """Return (x, y, theta_raw, tracked) from the newest complete mocap row, or None."""
+    try:
+        with path.open("rb") as source:
+            source.seek(0, os.SEEK_END)
+            source.seek(max(0, source.tell() - 1024))
+            lines = source.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return None
+    # The logger may be mid-write, so fall back to the previous line.
+    for line in reversed(lines[-3:]):
+        fields = line.split(",")
+        try:
+            x, y, theta = float(fields[1]), float(fields[2]), float(fields[3])
+            tracked = fields[4].strip() == "1"
+        except (ValueError, IndexError):
+            continue
+        return x, y, theta, tracked
+    return None
+
+
+def safety_problem(marker_x: float, marker_y: float, theta_raw: float) -> str | None:
+    """Describe why the robot must stop now, or return None if it is safe."""
+    x, y, _ = body_pose(marker_x, marker_y, theta_raw, config)
+    margin = config.EDGE_STOP_MARGIN_M
+    if not (config.WORKSPACE_X_MIN_M + margin <= x <= config.WORKSPACE_X_MAX_M - margin
+            and config.WORKSPACE_Y_MIN_M + margin <= y <= config.WORKSPACE_Y_MAX_M - margin):
+        return (f"robot at x={x:.2f}, y={y:.2f} is within {margin} m of the "
+                "workspace edge")
+    return None
 
 
 def _wait_for_tracking(process: subprocess.Popen, path: Path) -> None:
@@ -74,9 +106,21 @@ def collect(candidate: Path, run_dir: Path) -> None:
              str(run_dir / "commands.csv"), str(run_dir / "publish_log.csv")],
             cwd=config.PROJECT_ROOT, start_new_session=True,
         )
+        last_tracked = time.monotonic()
         while velocity.poll() is None:
             if mocap.poll() is not None:
                 raise RuntimeError("Mocap logger exited during robot execution")
+            # Raising here stops the robot: the finally block interrupts the
+            # velocity runner, which always publishes its stop commands.
+            sample = latest_sample(mocap_path)
+            if sample is not None and sample[3]:
+                last_tracked = time.monotonic()
+                problem = safety_problem(*sample[:3])
+                if problem:
+                    raise RuntimeError(f"Safety stop: {problem}")
+            elif time.monotonic() - last_tracked > config.LIVE_TRACKING_TIMEOUT_S:
+                raise RuntimeError("Safety stop: mocap lost the robot for more than "
+                                   f"{config.LIVE_TRACKING_TIMEOUT_S} s")
             time.sleep(0.02)
         if velocity.returncode != 0:
             raise RuntimeError(f"Velocity runner returned {velocity.returncode}")

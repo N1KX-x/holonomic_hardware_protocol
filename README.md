@@ -80,17 +80,18 @@ Collect exactly one instance at a time:
 python3 main.py collect I001 --execute
 ```
 
-Between candidates, collection now uses a separate mocap-guided autonomous
-reset. Candidate 1's measured initial pose becomes the instance home pose. Each
-completed candidate is processed first; then bounded reset commands are issued
-and remeasured until both position and heading tolerances are met. The next
-candidate cannot start unless reset succeeds. Reset recordings live under
-`data/phase1/resets/` and are excluded from experimental deviations.
+Every instance uses the same start and goal (`START_X_M`, `GOAL_X_M`, ... in
+`config.py`, near opposite corners of the mat); only the obstacle layout is
+random. The robot starts facing the goal. Before every candidate, a live mocap
+check (`hardware/start_check.py`) prints how to move the robot and waits until
+it is within `START_POSITION_TOLERANCE_M` and `START_HEADING_TOLERANCE_RAD` of
+the start. With `AUTONOMOUS_RESET_ENABLED = False` (the default) the operator
+walks the robot back between candidates; with `True` the mocap-guided
+autonomous reset runs first and the same check follows.
 
-`AUTONOMOUS_RESET_ENABLED` is deliberately `False` in the delivered config.
-Review `RESET_*` speeds, tolerances, maximum attempts, the open physical return
-path, and emergency-stop procedure before enabling it. A failed reset discards
-the complete instance.
+During every run, the collector stops the robot if its body center comes within
+`EDGE_STOP_MARGIN_M` of the workspace edge, or if mocap loses it for
+`LIVE_TRACKING_TIMEOUT_S`. The run then fails like any other.
 
 If any candidate fails, every raw run belonging to that instance is renamed
 with `_discarded` and the instance status becomes `discarded`. It is not rerun.

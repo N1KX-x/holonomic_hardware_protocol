@@ -66,7 +66,7 @@ class Phase1ReportTests(unittest.TestCase):
             mock.patch.object(config, "NOTES_FILE", root / "notes.txt"),
             mock.patch.object(config, "CANDIDATES_PER_INSTANCE", 2),
             mock.patch.object(config, "REQUIRE_OPERATOR_CONFIRMATION", False),
-            mock.patch.object(config, "AUTONOMOUS_RESET_ENABLED", True),
+            mock.patch.object(config, "AUTONOMOUS_RESET_ENABLED", False),
             mock.patch.object(main, "PLAN_ROOT", root / "plans"),
             mock.patch.object(main, "RAW_ROOT", root / "raw"),
             mock.patch.object(main, "VALIDATION_CSV", root / "collection_validation.csv"),
@@ -74,6 +74,7 @@ class Phase1ReportTests(unittest.TestCase):
             mock.patch.object(main, "load_phase0", return_value=0.2),
             mock.patch("hardware.collector.collect", side_effect=_fake_collect),
             mock.patch("hardware.reset_controller.autonomous_return"),
+            mock.patch("hardware.start_check.wait_for_start", return_value=START),
         ]
         for patch in patches:
             patch.start()

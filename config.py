@@ -30,9 +30,21 @@ MOCAP_LEAD_TIME_S = 0.5
 MOCAP_TRAIL_TIME_S = 0.5
 MAX_TRACKING_GAP_S = 0.10
 
+# Live safety stop. While a command sequence runs, the robot is stopped (and
+# the run fails) if its body center comes within EDGE_STOP_MARGIN_M of the
+# workspace edge, or if mocap has not tracked it for LIVE_TRACKING_TIMEOUT_S.
+EDGE_STOP_MARGIN_M = 0.30
+LIVE_TRACKING_TIMEOUT_S = 0.50
+
+# Before every Phase 1 candidate the robot must stand this close to the
+# planned start pose, checked live with mocap.
+START_POSITION_TOLERANCE_M = 0.15
+START_HEADING_TOLERANCE_RAD = 0.17  # about 10 degrees
+
 # Autonomous repositioning between candidates. This motion is recorded in a
-# separate reset folder and is never included in deviation analysis.
-AUTONOMOUS_RESET_ENABLED = True
+# separate reset folder and is never included in deviation analysis. When
+# False, the operator walks the robot back to the start between candidates.
+AUTONOMOUS_RESET_ENABLED = False
 RESET_POSITION_TOLERANCE_M = 0.10
 RESET_HEADING_TOLERANCE_RAD = 0.20
 RESET_COMMAND_DT_S = 2.0
@@ -70,10 +82,12 @@ POSITIVE_LATERAL_COMMAND_SIGN = 1.0
 
 
 # Workspace in mocap world coordinates (replace after mapping capture area) --
-WORKSPACE_X_MIN_M = -4.0
-WORKSPACE_X_MAX_M = 4.0
-WORKSPACE_Y_MIN_M = -4.0
-WORKSPACE_Y_MAX_M = 4.0
+# Largest axis-aligned rectangle inside the four measured mat corners:
+# start (2.454, -3.039), (2.231, 2.903), goal (-3.587, 2.776), (-3.362, -2.408).
+WORKSPACE_X_MIN_M = -3.362
+WORKSPACE_X_MAX_M = 2.231
+WORKSPACE_Y_MIN_M = -2.408
+WORKSPACE_Y_MAX_M = 2.776
 
 # Conservative planar footprint radius of the robot. Measure from the robot's
 # body/control center to its furthest occupied point and add any desired fixed
@@ -94,6 +108,16 @@ TRANSLATIONAL_SPEED_MAX_MPS = None
 # Planning ------------------------------------------------------------------
 GOAL_RADIUS_M = 0.50
 START_REGION_RADIUS_M = 0.50
+# Fixed start and goal centers for every instance (only obstacles are random).
+# Each is 0.9 m in from its workspace corner, which leaves room for the robot
+# radius plus any viable rho (< GOAL_RADIUS_M). Set START_X_M = None to sample
+# start and goal at random instead.
+START_X_M = 1.331
+START_Y_M = -1.508
+GOAL_X_M = -2.462
+GOAL_Y_M = 1.876
+# None makes the robot start facing the goal.
+START_THETA_RAD = None
 # PHASE0_RESULTS_CSV supplies the frozen rho used by main.py. This fallback is
 # only written into planning templates before the Phase 0 summary exists.
 RHO_INITIAL_GUESS_M = 0.20
@@ -181,3 +205,20 @@ def validate() -> None:
         raise ValueError("Reset translation limits cannot exceed experiment limits")
     if RESET_OMEGA_MAX_RADPS > OMEGA_MAX_RADPS:
         raise ValueError("Reset yaw limit cannot exceed experiment limit")
+    safety_positive = {
+        "EDGE_STOP_MARGIN_M": EDGE_STOP_MARGIN_M,
+        "LIVE_TRACKING_TIMEOUT_S": LIVE_TRACKING_TIMEOUT_S,
+        "START_POSITION_TOLERANCE_M": START_POSITION_TOLERANCE_M,
+        "START_HEADING_TOLERANCE_RAD": START_HEADING_TOLERANCE_RAD,
+    }
+    for name, value in safety_positive.items():
+        if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+            raise ValueError(f"{name} must be finite and positive")
+    if START_X_M is not None:
+        # Any viable rho is below GOAL_RADIUS_M, so this clearance always suffices.
+        clearance = ROBOT_RADIUS_M + GOAL_RADIUS_M
+        for name, x, y in (("start", START_X_M, START_Y_M), ("goal", GOAL_X_M, GOAL_Y_M)):
+            if not (WORKSPACE_X_MIN_M + clearance <= x <= WORKSPACE_X_MAX_M - clearance
+                    and WORKSPACE_Y_MIN_M + clearance <= y <= WORKSPACE_Y_MAX_M - clearance):
+                raise ValueError(f"Fixed {name} must be at least {clearance:.2f} m "
+                                 "inside the workspace")

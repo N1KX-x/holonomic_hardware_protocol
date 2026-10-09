@@ -80,16 +80,24 @@ def sample_problem(instance: int, seed: int, rho: float) -> Problem:
     margin = (max(config.GOAL_RADIUS_M, config.OBSTACLE_RADIUS_MAX_M)
               + config.ROBOT_RADIUS_M + rho)
     for _ in range(10000):
-        start_x = rng.uniform(config.WORKSPACE_X_MIN_M + margin,
-                              config.WORKSPACE_X_MAX_M - margin)
-        start_y = rng.uniform(config.WORKSPACE_Y_MIN_M + margin,
-                              config.WORKSPACE_Y_MAX_M - margin)
-        goal_x = rng.uniform(config.WORKSPACE_X_MIN_M + margin,
-                             config.WORKSPACE_X_MAX_M - margin)
-        goal_y = rng.uniform(config.WORKSPACE_Y_MIN_M + margin,
-                             config.WORKSPACE_Y_MAX_M - margin)
-        if math.hypot(goal_x-start_x, goal_y-start_y) < 2.0*config.GOAL_RADIUS_M:
-            continue
+        if config.START_X_M is None:
+            start_x = rng.uniform(config.WORKSPACE_X_MIN_M + margin,
+                                  config.WORKSPACE_X_MAX_M - margin)
+            start_y = rng.uniform(config.WORKSPACE_Y_MIN_M + margin,
+                                  config.WORKSPACE_Y_MAX_M - margin)
+            goal_x = rng.uniform(config.WORKSPACE_X_MIN_M + margin,
+                                 config.WORKSPACE_X_MAX_M - margin)
+            goal_y = rng.uniform(config.WORKSPACE_Y_MIN_M + margin,
+                                 config.WORKSPACE_Y_MAX_M - margin)
+            if math.hypot(goal_x-start_x, goal_y-start_y) < 2.0*config.GOAL_RADIUS_M:
+                continue
+            start_theta = 0.0
+        else:
+            # Fixed start and goal: only the obstacle layout differs per instance.
+            start_x, start_y = config.START_X_M, config.START_Y_M
+            goal_x, goal_y = config.GOAL_X_M, config.GOAL_Y_M
+            start_theta = (math.atan2(goal_y-start_y, goal_x-start_x)
+                           if config.START_THETA_RAD is None else config.START_THETA_RAD)
         count = rng.randint(config.OBSTACLE_COUNT_MIN, config.OBSTACLE_COUNT_MAX)
         obstacles: list[Circle] = []
         for _ in range(count):
@@ -111,7 +119,7 @@ def sample_problem(instance: int, seed: int, rho: float) -> Problem:
             else:
                 break
         if len(obstacles) == count:
-            return Problem(instance, start_x, start_y, 0.0, goal_x, goal_y,
+            return Problem(instance, start_x, start_y, start_theta, goal_x, goal_y,
                            tuple(obstacles), seed)
     raise RuntimeError("Could not sample a valid planning problem")
 

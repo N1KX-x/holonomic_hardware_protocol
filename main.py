@@ -156,17 +156,17 @@ def collect(instance_id: str, execute: bool) -> None:
         raise ValueError(f"Unknown instance {instance_id}")
     if row["status"] != "planned":
         raise RuntimeError(f"{instance_id} status is {row['status']}; it cannot be executed")
-    if config.CANDIDATES_PER_INSTANCE > 1 and not config.AUTONOMOUS_RESET_ENABLED:
-        raise RuntimeError(
-            "AUTONOMOUS_RESET_ENABLED is False. Review reset limits and enable it "
-            "before multi-candidate collection."
-        )
     if config.REQUIRE_OPERATOR_CONFIRMATION:
         answer = input(f"Execute all candidates in {instance_id}? Type the instance ID: ").strip()
         if answer != instance_id:
             raise RuntimeError("Operator confirmation did not match")
     from hardware.collector import collect as collect_hardware
     from hardware.reset_controller import autonomous_return
+    from hardware.start_check import wait_for_start
+    start_pose = (float(row["start_x"]), float(row["start_y"]), float(row["start_theta"]))
+    # Checked before the instance is marked as collecting, so stopping here
+    # (Ctrl+C) leaves the instance planned rather than discarded.
+    wait_for_start(start_pose, f"{instance_id}_C01")
     row["status"] = "collecting"
     _replace_problem_rows(rows)
     try:
@@ -190,11 +190,16 @@ def collect(instance_id: str, execute: bool) -> None:
                                  metric.initial_x_m, metric.initial_y_m,
                                  metric.initial_theta_rad])
             if candidate_number < config.CANDIDATES_PER_INSTANCE:
-                autonomous_return(
-                    home_pose,
-                    run_dir,
-                    RESET_ROOT / f"{instance_id}_after_{candidate_id}",
-                )
+                next_id = f"C{candidate_number + 1:02d}"
+                if config.AUTONOMOUS_RESET_ENABLED:
+                    autonomous_return(
+                        home_pose,
+                        run_dir,
+                        RESET_ROOT / f"{instance_id}_after_{candidate_id}",
+                    )
+                else:
+                    print(f"{candidate_id} finished. Walk the robot back to the start.")
+                wait_for_start(start_pose, f"{instance_id}_{next_id}")
         row["status"] = "ok"
     except BaseException as error:
         row["status"] = "discarded"

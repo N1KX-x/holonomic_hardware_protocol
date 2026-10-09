@@ -157,17 +157,26 @@ your decision (the protocol does not say).
 
        The last line prints e.g. "Next randomized instance: I047".
 
-    b) Walk the robot to that instance's start: look up start_x and
-       start_y in data/phase1/problems.csv, and face the robot along
-       world +x.
+    b) Put the robot at the start (every instance uses the same start
+       near the start corner, facing the goal corner). The program checks
+       this with mocap before each candidate (step c).
 
     c) Collect all candidates of that instance (use the ID from step a):
 
        python3 main.py collect I047 --execute
 
-       The robot is returned to the start automatically between
-       candidates. If anything fails, the whole instance is discarded
-       and is NOT rerun; just go back to step a).
+       Before every candidate the program checks the robot's pose with
+       mocap and prints how to adjust it, e.g.
+         "Not at start: move 0.20 m forward and 0.05 m left, then turn
+          right 8 deg."
+       Adjust the robot and press Enter until it prints "OK" (within
+       0.15 m and about 10 deg). Between candidates, walk the robot back
+       to the start yourself; the same check runs again.
+       During every run the robot is stopped automatically if it comes
+       within 0.3 m of the workspace edge or mocap loses it for 0.5 s.
+       If anything fails, the whole instance is discarded and is NOT
+       rerun; just go back to step a). Pressing Ctrl+C at the very first
+       start check leaves the instance untouched.
 
        When the instance finishes cleanly, the analysis is updated
        automatically and the deviation E of each candidate is printed,
@@ -213,11 +222,10 @@ instances not collected yet show the planned RRT paths only):
 
 
 ----------------------------------------------------------------------
-KNOWN LIMITATIONS (fix before Phase 1 if possible)
+SAFETY NOTES
 ----------------------------------------------------------------------
 
-- A failed autonomous return between candidates discards the whole
-  instance, which drops long start-to-goal problems more often.
-- Nothing detects the robot leaving the workspace during a run; watch for
-  it and stop the run (Ctrl+C) if it happens. That discards the instance.
-- The start pose is not checked; place the robot carefully in step 3.3 b).
+- The safety stop uses the workspace in config.py (the rectangle inside
+  the measured mat corners). Phase 0 runs must also start inside it, at
+  least 0.3 m from its edges, or they stop immediately.
+- Keep someone on the e-stop anyway: the safety stop depends on mocap.

@@ -171,11 +171,20 @@ def _load_mocap(path: Path, cfg):
                 value += 2 * math.pi
         theta.append(value)
         previous = value
-    body_x = [mx + math.cos(th)*cfg.MARKER_TO_BODY_X_M - math.sin(th)*cfg.MARKER_TO_BODY_Y_M
-              for mx, th in zip(marker_x, theta)]
-    body_y = [my + math.sin(th)*cfg.MARKER_TO_BODY_X_M + math.cos(th)*cfg.MARKER_TO_BODY_Y_M
-              for my, th in zip(marker_y, theta)]
-    return times, body_x, body_y, theta
+    body = [_marker_to_body(mx, my, th, cfg) for mx, my, th in zip(marker_x, marker_y, theta)]
+    return times, [b[0] for b in body], [b[1] for b in body], theta
+
+
+def _marker_to_body(marker_x: float, marker_y: float, theta: float, cfg) -> tuple[float, float]:
+    """Shift a marker position to the body center using the corrected heading."""
+    return (marker_x + math.cos(theta)*cfg.MARKER_TO_BODY_X_M - math.sin(theta)*cfg.MARKER_TO_BODY_Y_M,
+            marker_y + math.sin(theta)*cfg.MARKER_TO_BODY_X_M + math.cos(theta)*cfg.MARKER_TO_BODY_Y_M)
+
+
+def body_pose(marker_x: float, marker_y: float, theta_raw: float, cfg) -> tuple[float, float, float]:
+    """Corrected body pose (x, y, heading) from one raw mocap sample."""
+    theta = theta_raw + cfg.YAW_OFFSET_RAD
+    return (*_marker_to_body(marker_x, marker_y, theta, cfg), wrap_angle(theta))
 
 
 def _interp(query: float, times: list[float], values: list[float]) -> float:
