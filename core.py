@@ -190,8 +190,23 @@ def _interp(query: float, times: list[float], values: list[float]) -> float:
     return values[left] + fraction * (values[right] - values[left])
 
 
-def process_execution(run_dir: Path, motion_group: str, cfg) -> ExecutionMetrics:
-    """Compute protocol E from raw commands.csv and mocap.csv."""
+@dataclass(frozen=True)
+class ExecutionTrace:
+    commands: list[Command]
+    initial_pose: tuple[float, float, float]
+    nominal_at_boundaries: list[tuple[float, float, float]]
+    actual_at_boundaries: list[tuple[float, float]]
+    actual_path: list[tuple[float, float]]
+
+    @property
+    def errors(self) -> list[float]:
+        return [math.hypot(ax-state[0], ay-state[1])
+                for (ax, ay), state in zip(self.actual_at_boundaries,
+                                           self.nominal_at_boundaries)]
+
+
+def trace_execution(run_dir: Path, cfg) -> ExecutionTrace:
+    """Validate one run and pair nominal and measured positions at segment boundaries."""
     commands = load_sent_commands(run_dir / "commands.csv")
     times, body_x, body_y, theta = _load_mocap(run_dir / "mocap.csv", cfg)
     t0 = commands[0].t_send
@@ -205,13 +220,19 @@ def process_execution(run_dir: Path, motion_group: str, cfg) -> ExecutionMetrics
                _interp(t0, times, theta))
     boundary_times, nominal = nominal_boundaries(commands, initial)
     actual = [(_interp(t, times, body_x), _interp(t, times, body_y)) for t in boundary_times]
-    errors = [math.hypot(ax-state[0], ay-state[1])
-              for (ax, ay), state in zip(actual, nominal)]
     points = [actual[0]] + [(x, y) for t, x, y in zip(times, body_x, body_y) if t0 < t < tf] + [actual[-1]]
+    return ExecutionTrace(commands, initial, nominal, actual, points)
+
+
+def process_execution(run_dir: Path, motion_group: str, cfg) -> ExecutionMetrics:
+    """Compute protocol E from raw commands.csv and mocap.csv."""
+    trace = trace_execution(run_dir, cfg)
+    initial = trace.initial_pose
+    points = trace.actual_path
     actual_distance = sum(math.hypot(b[0]-a[0], b[1]-a[1]) for a, b in zip(points, points[1:]))
-    commanded_distance = sum(math.hypot(c.vx, c.vy)*c.dt for c in commands)
+    commanded_distance = sum(math.hypot(c.vx, c.vy)*c.dt for c in trace.commands)
     return ExecutionMetrics(
-        run_dir.name, motion_group, max(errors), commanded_distance, actual_distance,
+        run_dir.name, motion_group, max(trace.errors), commanded_distance, actual_distance,
         commanded_distance / actual_distance if actual_distance > 0 else math.nan,
         initial[0], initial[1], wrap_angle(initial[2]),
     )

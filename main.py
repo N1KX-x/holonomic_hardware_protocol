@@ -18,6 +18,7 @@ import config
 from analyze_phase1 import analyze
 from core import process_execution, validate_commands, write_candidate_csv
 from planner import obstacles_json, plan_candidate, sample_problem
+from plot_phase1 import plot_instance
 
 
 PLAN_ROOT = config.PHASE1_ROOT / "plans"
@@ -231,6 +232,12 @@ def report_instance(instance_id: str) -> None:
     print(f"{instance_id} done: largest E over {len(finished)} candidates = {largest:.3f} m")
     print(f"Analysis updated for {len(instances)} complete instance(s) in "
           f"{config.PHASE1_ROOT / 'analysis'}")
+    # Plots are optional: a missing matplotlib must not hide the analysis above.
+    try:
+        paths = plot_instance(instance_id)
+        print(f"Saved {len(paths)} trajectory plot(s) in {paths[0].parent}")
+    except Exception as error:
+        print(f"Trajectory plots skipped: {error}")
 
 
 def status() -> None:

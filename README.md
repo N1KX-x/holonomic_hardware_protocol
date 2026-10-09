@@ -107,6 +107,17 @@ python3 analyze_phase1.py
 It writes per-execution deviations and the maximum deviation across all `m`
 candidates for each complete instance.
 
+`collect` also saves one plot per candidate in `data/phase1/analysis/plots/`:
+virtual obstacles (real and inflated), start and goal regions, the planned RRT
+path, the nominal model from the measured start, the real mocap trajectory,
+and the largest deviation. Plots can be drawn at any time, including for
+instances not yet collected (planned paths only):
+
+```bash
+python3 plot_phase1.py I001
+python3 plot_phase1.py all
+```
+
 ## Files produced
 
 ```text

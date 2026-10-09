@@ -8,7 +8,14 @@ from unittest import mock
 
 import config
 import main
+import plot_phase1
 from core import Command, load_candidate_csv, step_holonomic, write_candidate_csv
+
+try:
+    import matplotlib  # noqa: F401
+    HAVE_MATPLOTLIB = True
+except ImportError:
+    HAVE_MATPLOTLIB = False
 
 
 START = (0.5, -0.3, 0.4)
@@ -75,11 +82,15 @@ class Phase1ReportTests(unittest.TestCase):
             commands = [Command(k, 0.3, vy, 0.2, config.DT_S)
                         for k in range(config.T_SEGMENTS)]
             write_candidate_csv(root / "plans" / "I001" / f"C{number:02d}.csv", commands)
+        obstacles = '[{"x":1.5,"y":1.0,"radius":0.2}]'
         with config.PROBLEMS_CSV.open("w", newline="") as target:
             writer = csv.writer(target)
-            writer.writerow(["instance", "status", "note"])
-            writer.writerow(["I001", "planned", ""])
-            writer.writerow(["I002", "planned", ""])
+            writer.writerow(["instance", "start_x", "start_y", "start_theta", "goal_x",
+                             "goal_y", "goal_radius_m", "robot_radius_m", "obstacles",
+                             "rho_m", "status", "note"])
+            for instance in ("I001", "I002"):
+                writer.writerow([instance, *START, 2.0, 2.0, 0.5, 0.3, obstacles,
+                                 0.2, "planned", ""])
 
     def _collect(self, instance_id: str) -> str:
         output = io.StringIO()
@@ -101,6 +112,31 @@ class Phase1ReportTests(unittest.TestCase):
             rows = list(csv.DictReader(source))
         self.assertEqual([row["instance"] for row in rows], ["I001"])
         self.assertLess(float(rows[0]["max_candidate_deviation_m"]), 1e-3)
+
+    @unittest.skipUnless(HAVE_MATPLOTLIB, "matplotlib is not installed")
+    def test_finished_instance_is_plotted(self):
+        output = self._collect("I001")
+        self.assertIn("Saved 2 trajectory plot(s)", output)
+        for candidate in ("C01", "C02"):
+            plot = self.root / "analysis" / "plots" / f"I001_{candidate}.png"
+            self.assertGreater(plot.stat().st_size, 0)
+
+    @unittest.skipUnless(HAVE_MATPLOTLIB, "matplotlib is not installed")
+    def test_uncollected_instance_plots_planned_paths(self):
+        write_candidate_csv(self.root / "plans" / "I002" / "C01.csv",
+                            [Command(k, 0.3, 0.0, 0.0, config.DT_S)
+                             for k in range(config.T_SEGMENTS)])
+        paths = plot_phase1.plot_instance("I002")
+        self.assertEqual([path.name for path in paths], ["I002_C01.png"])
+        self.assertGreater(paths[0].stat().st_size, 0)
+
+    def test_missing_matplotlib_keeps_instance_ok(self):
+        with mock.patch.object(main, "plot_instance",
+                               side_effect=ImportError("No module named 'matplotlib'")):
+            output = self._collect("I001")
+        self.assertEqual(self._status("I001"), "ok")
+        self.assertIn("I001 done", output)
+        self.assertIn("Trajectory plots skipped", output)
 
     def test_analysis_failure_keeps_instance_ok(self):
         with mock.patch.object(main, "analyze", side_effect=RuntimeError("disk full")):

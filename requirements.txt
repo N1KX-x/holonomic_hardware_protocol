@@ -1,4 +1,5 @@
 # Offline planner and CSV processing use only the Python standard library.
-# The optional simulation script uses matplotlib.
+# Trajectory plots (plot_phase1.py) and the simulation script use matplotlib;
+# without it, collection and CSV analysis still work and plots are skipped.
 # Hardware collection requires the Nova/ROS 2 environment:
 # rclpy, geometry_msgs, and unitree_go.
