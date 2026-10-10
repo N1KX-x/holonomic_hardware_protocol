@@ -119,6 +119,23 @@ python3 plot_phase1.py I001
 python3 plot_phase1.py all
 ```
 
+## Training data for a learned model
+
+`collect_training.py` collects random-command runs for training a learned
+dynamics model. Repeat the same command for every trial; each run is saved as
+the next `trial_NNN`:
+
+```bash
+python3 collect_training.py             # preview the next trial
+python3 collect_training.py --execute   # run it on the robot
+```
+
+Each trial reads the robot's pose from mocap and draws `TRAINING_SEGMENTS`
+commands whose nominal path stays `TRAINING_PLAN_MARGIN_M` inside the
+workspace. About 80 % of trials are mixed; the rest are single-axis. Failed
+trials are kept as `trial_NNN_discarded` and their numbers are not reused.
+Step-by-step lab instructions are in `TRAINING_INSTRUCTIONS.txt`.
+
 ## Files produced
 
 ```text

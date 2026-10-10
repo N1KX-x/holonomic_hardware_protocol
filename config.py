@@ -159,6 +159,23 @@ PILOT_HIGH_QUANTILE = 0.90
 RHO_MULTIPLIER = 1.75
 
 
+# Training data for a learned dynamics model ---------------------------------
+# collect_training.py drives one random command sequence per call and saves it
+# as the next free trial_NNN. These runs only train a model; they are never
+# used for Phase 0 calibration or Phase 1.
+TRAINING_ROOT = DATA_ROOT / "training"
+TRAINING_SEGMENTS = 20
+# Trials come in blocks of this many mixed (vx, vy, omega) runs plus one
+# vx-only, one vy-only and one omega-only run, in a seeded random order.
+# 12 makes 12 of every 15 trials mixed (80 %).
+TRAINING_MIXED_PER_BLOCK = 12
+TRAINING_RANDOM_SEED = 20261010
+# Commands are drawn from the measured start pose so that the nominal path
+# stays at least this far inside the workspace. The real path drifts from the
+# nominal one, so keep EDGE_STOP_MARGIN_M set as well.
+TRAINING_PLAN_MARGIN_M = 0.50
+
+
 # Session metadata ----------------------------------------------------------
 SESSION_ID = "S01"
 OPERATOR = ""
@@ -226,6 +243,14 @@ def validate() -> None:
     for name, value in safety_positive.items():
         if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
             raise ValueError(f"{name} must be finite and positive")
+    if not isinstance(TRAINING_SEGMENTS, int) or TRAINING_SEGMENTS < 1:
+        raise ValueError("TRAINING_SEGMENTS must be a positive integer")
+    if not isinstance(TRAINING_MIXED_PER_BLOCK, int) or TRAINING_MIXED_PER_BLOCK < 0:
+        raise ValueError("TRAINING_MIXED_PER_BLOCK must be a non-negative integer")
+    if not (isinstance(TRAINING_PLAN_MARGIN_M, (int, float)) and TRAINING_PLAN_MARGIN_M >= 0
+            and 2 * TRAINING_PLAN_MARGIN_M < min(WORKSPACE_X_MAX_M - WORKSPACE_X_MIN_M,
+                                                 WORKSPACE_Y_MAX_M - WORKSPACE_Y_MIN_M)):
+        raise ValueError("TRAINING_PLAN_MARGIN_M must leave room inside the workspace")
     if START_X_M is not None:
         # Any viable rho is below GOAL_RADIUS_M, so this clearance always suffices.
         clearance = ROBOT_RADIUS_M + GOAL_RADIUS_M

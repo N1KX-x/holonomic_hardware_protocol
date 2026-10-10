@@ -222,6 +222,15 @@ instances not collected yet show the planned RRT paths only):
 
 
 ----------------------------------------------------------------------
+5. TRAINING DATA FOR A LEARNED MODEL
+----------------------------------------------------------------------
+
+See TRAINING_INSTRUCTIONS.txt. In short, repeat this for every trial:
+
+    python3 collect_training.py --execute
+
+
+----------------------------------------------------------------------
 SAFETY NOTES
 ----------------------------------------------------------------------
 
