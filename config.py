@@ -104,11 +104,16 @@ OMEGA_MAX_RADPS = 1.0
 # Optional combined translational limit. Set None if the interface has none.
 TRANSLATIONAL_SPEED_MAX_MPS = None
 # Calibrated nominal model (protocol open item 4): the model predicts the robot
-# achieving these fractions of each commanded velocity. Measured from the
-# single-axis Phase 0 pilots (attempt 3). Set all to 1.0 for the raw model.
-MODEL_GAIN_VX = 0.99
-MODEL_GAIN_VY = 0.90
-MODEL_GAIN_OMEGA = 0.77
+# achieving these fractions of each commanded velocity, separately for each of
+# the six directions. Measured per segment from the 14 valid Phase 0 pilots of
+# 2026-10-09; last week's runs agree (e.g. -vy 0.77, +vy 0.97). Set all to 1.0
+# for the raw model.
+MODEL_GAIN_VX_POS = 1.05     # forward
+MODEL_GAIN_VX_NEG = 0.97     # backward
+MODEL_GAIN_VY_POS = 1.00     # sideways to the robot's left
+MODEL_GAIN_VY_NEG = 0.74     # sideways to the robot's right
+MODEL_GAIN_OMEGA_POS = 0.82  # turning left (counterclockwise)
+MODEL_GAIN_OMEGA_NEG = 0.79  # turning right (clockwise)
 
 
 # Planning ------------------------------------------------------------------
@@ -231,7 +236,8 @@ def validate() -> None:
     if EDGE_STOP_MARGIN_M is not None and not (
             isinstance(EDGE_STOP_MARGIN_M, (int, float)) and EDGE_STOP_MARGIN_M >= 0):
         raise ValueError("EDGE_STOP_MARGIN_M must be None or a non-negative number")
-    for name in ("MODEL_GAIN_VX", "MODEL_GAIN_VY", "MODEL_GAIN_OMEGA"):
+    for name in ("MODEL_GAIN_VX_POS", "MODEL_GAIN_VX_NEG", "MODEL_GAIN_VY_POS",
+                 "MODEL_GAIN_VY_NEG", "MODEL_GAIN_OMEGA_POS", "MODEL_GAIN_OMEGA_NEG"):
         value = globals()[name]
         if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
             raise ValueError(f"{name} must be finite and positive")

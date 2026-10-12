@@ -72,9 +72,15 @@ def step_holonomic(
 
 def nominal_step(x: float, y: float, theta: float, command: Command, cfg,
                  duration: float | None = None) -> tuple[float, float, float]:
-    """Nominal model: the exact holonomic step with the calibrated command gains."""
-    return step_holonomic(x, y, theta, cfg.MODEL_GAIN_VX*command.vx,
-                          cfg.MODEL_GAIN_VY*command.vy, cfg.MODEL_GAIN_OMEGA*command.omega,
+    """Nominal model: the exact holonomic step with the calibrated command gains.
+
+    Each axis has one gain per direction, chosen by the sign of its command.
+    """
+    vx = command.vx * (cfg.MODEL_GAIN_VX_POS if command.vx >= 0 else cfg.MODEL_GAIN_VX_NEG)
+    vy = command.vy * (cfg.MODEL_GAIN_VY_POS if command.vy >= 0 else cfg.MODEL_GAIN_VY_NEG)
+    omega = command.omega * (cfg.MODEL_GAIN_OMEGA_POS if command.omega >= 0
+                             else cfg.MODEL_GAIN_OMEGA_NEG)
+    return step_holonomic(x, y, theta, vx, vy, omega,
                           command.dt if duration is None else duration)
 
 

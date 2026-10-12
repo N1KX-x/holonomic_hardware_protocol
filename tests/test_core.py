@@ -24,13 +24,18 @@ class CoreTests(unittest.TestCase):
         self.assertAlmostEqual(theta, math.pi/2)
 
     def test_nominal_model_applies_calibrated_gains(self):
-        command = Command(0, 0.5, 0.2, 0.4, 2.0)
-        with mock.patch.multiple(config, MODEL_GAIN_VX=0.9, MODEL_GAIN_VY=0.8,
-                                 MODEL_GAIN_OMEGA=0.7):
-            got = nominal_step(1.0, 2.0, 0.3, command, config)
-        expected = step_holonomic(1.0, 2.0, 0.3, 0.45, 0.16, 0.28, 2.0)
-        for value, target in zip(got, expected):
-            self.assertAlmostEqual(value, target)
+        gains = dict(MODEL_GAIN_VX_POS=0.9, MODEL_GAIN_VX_NEG=0.5, MODEL_GAIN_VY_POS=0.8,
+                     MODEL_GAIN_VY_NEG=0.4, MODEL_GAIN_OMEGA_POS=0.7, MODEL_GAIN_OMEGA_NEG=0.3)
+        # Each axis uses the gain for the direction of its own command.
+        cases = [((0.5, 0.2, 0.4), (0.45, 0.16, 0.28)),
+                 ((-0.5, -0.2, -0.4), (-0.25, -0.08, -0.12)),
+                 ((0.5, -0.2, 0.4), (0.45, -0.08, 0.28))]
+        with mock.patch.multiple(config, **gains):
+            for (vx, vy, omega), scaled in cases:
+                got = nominal_step(1.0, 2.0, 0.3, Command(0, vx, vy, omega, 2.0), config)
+                expected = step_holonomic(1.0, 2.0, 0.3, *scaled, 2.0)
+                for value, target in zip(got, expected):
+                    self.assertAlmostEqual(value, target)
 
     def test_candidate_csv_round_trip(self):
         commands = [Command(k, 0.1, 0.0, 0.0, config.DT_S)
@@ -62,8 +67,9 @@ class CoreTests(unittest.TestCase):
             # Synthetic data has no marker offset, whatever the lab calibration is.
             with mock.patch.multiple(config, MAX_TRACKING_GAP_S=2.0, YAW_OFFSET_RAD=0.0,
                                      MARKER_TO_BODY_X_M=0.0, MARKER_TO_BODY_Y_M=0.0,
-                                     MODEL_GAIN_VX=1.0, MODEL_GAIN_VY=1.0,
-                                     MODEL_GAIN_OMEGA=1.0):
+                                     MODEL_GAIN_VX_POS=1.0, MODEL_GAIN_VX_NEG=1.0, MODEL_GAIN_VY_POS=1.0,
+                                     MODEL_GAIN_VY_NEG=1.0, MODEL_GAIN_OMEGA_POS=1.0,
+                                     MODEL_GAIN_OMEGA_NEG=1.0):
                 metric = process_execution(run, "test", config)
         self.assertAlmostEqual(metric.initial_x_m, 5.0)
         self.assertAlmostEqual(metric.initial_y_m, 3.0)
