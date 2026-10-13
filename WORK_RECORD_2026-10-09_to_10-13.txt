@@ -1,0 +1,316 @@
+WORK RECORD - Go2 conformal constraint tightening experiment
+Friday 2026-10-09 to Tuesday 2026-10-13
+======================================================================
+
+Project:  hardware data collection for "Conformal Constraint Tightening
+          for Chance-Constrained Motion Planning with Unknown Dynamics"
+          (Natraj, Sinopoli, Kantaros, arXiv:2607.22409).
+Robot:    Unitree Go2, commanded open-loop with body-frame velocities
+          (vx, vy, omega), each command held for dt = 2 s.
+Sensing:  OptiTrack / Motive motion capture, rigid body ID 1006.
+Code:     https://github.com/N1KX-x/holonomic_hardware_protocol
+Protocol: hardware_protocol_full_holonomic.md
+
+Quantities used throughout
+  E    largest distance between the real robot and the nominal model
+       during one run, checked at each 2 s segment boundary.
+  q    90th percentile of E over the Phase 0 pilot runs.
+  rho  planning margin = 1.75 x q. The protocol requires
+       q < rho < goal radius. With goal radius 0.5 m this means
+       rho < 0.5 m, i.e. q < 0.29 m.
+  "fair test"  each run scored with a model fitted WITHOUT that run.
+
+
+----------------------------------------------------------------------
+1. THE INITIAL CODE
+----------------------------------------------------------------------
+
+What existed on Friday morning (first commit 9e300eb):
+  phase0.py            pipeline checks + 15-run deviation pilot
+  main.py              Phase 1 planning and collection
+  analyze_phase1.py    offline deviation analysis
+  core.py              nominal model, CSV handling, E computation
+  planner.py           full-holonomic kinodynamic RRT
+  hardware/            mocap logger, velocity sender, collector,
+                       autonomous reset
+  config.py            all settings
+
+Review against the protocol. Correct from the start: the exact
+holonomic model, E (position only, interpolated at matched times, cut
+at T x dt, started from the measured pose), raw yaw stored uncorrected,
+seeded and shuffled RRT candidates, random instance order, whole-
+instance discard, pilot data kept separate, rho frozen after Phase 0.
+
+Problems found in the review:
+  1. Six of the 15 pilot plans exceeded the combined speed limit and
+     could never be collected.                                [fixed]
+  2. Autonomous reset could travel only ~2.4 m and discarded the
+     instance when it failed (selection bias).   [replaced, see sec. 2]
+  3. Nothing detected the robot leaving the workspace.
+                               [edge stop added, later turned off]
+  4. Safety flags in config.py contradicted the README.     [reported]
+  5. Yaw offset estimated but not enforced.       [handled by procedure]
+  6. Commanded/actual distance ratio biased by gait sway.   [reported]
+  7. notes.txt missing most protocol fields.                [reported]
+  8. Start pose never shown or checked.            [start check added]
+  9. No way to discard an instance afterwards.              [reported]
+ 10. Mocap timestamps are receive times, not capture times. [reported]
+
+
+----------------------------------------------------------------------
+2. CODE CHANGES (in order; commit ids from GitHub)
+----------------------------------------------------------------------
+
+Fri 10-09
+  9e300eb  Initial upload. Includes the pilot speed fix: single-axis
+           pilots respect the combined limit, every plan is validated
+           before any file is written, and the collector validates a
+           plan before creating its run folder.
+  e2c5c46  After each cleanly finished Phase 1 instance: analysis is
+           rebuilt automatically and one trajectory plot per candidate
+           is saved (plot_phase1.py): obstacles with two inflation
+           rings, start/goal regions, planned RRT path, model path from
+           the measured start, real mocap trajectory, largest deviation.
+  1b7923a  Fixed corner-to-corner course on the mat (see sec. 3),
+           live mocap start check before every candidate, manual
+           walk-back between candidates instead of the autonomous
+           reset, live safety stop (workspace edge, tracking loss).
+  96574e4  Tests made independent of the lab's calibration values.
+  (manual) Edge stop made optional and turned off
+           (EDGE_STOP_MARGIN_M = None). Tracking-loss stop stays on.
+  46965e1  Nominal model calibrated with three command gains
+           (vx 0.99, vy 0.90, omega 0.77).
+  ea0cfe9  Marker-to-body offset set to (-0.07, -0.01) m.
+Sat 10-10
+  2bd73ce  collect_training.py: random-command trials for a learned
+           dynamics model (done in a separate session).
+Sun 10-11
+  730025f  Six direction-dependent gains replace the three gains
+           (see sec. 5, method D). 30 unit tests pass.
+
+Also written: RUN_INSTRUCTIONS.txt (step-by-step lab procedure) and a
+summary document for the PI ("Go2 Phase 0 update").
+
+
+----------------------------------------------------------------------
+3. EXPERIMENT SETUP ON THE MAT
+----------------------------------------------------------------------
+
+Mat corners measured with the robot's rigid body (mocap x, y in m):
+    start corner   ( 2.454, -3.039)
+    next to start  ( 2.231,  2.903)
+    goal corner    (-3.587,  2.776)
+    last corner    (-3.362, -2.408)
+
+Workspace = largest axis-aligned rectangle inside those corners:
+    x from -3.362 to 2.231,  y from -2.408 to 2.776   (5.6 x 5.2 m)
+Fixed start (1.331, -1.508), fixed goal (-2.462, 1.876): 5.08 m apart,
+each 0.9 m in from its corner. Robot starts facing the goal.
+Obstacles: 4-6 random virtual circles per instance, radius 0.10-0.30 m.
+Goal radius 0.5 m, robot radius 0.30 m, 5 candidates per instance.
+
+Calibration
+  Yaw offset          2.404 rad (first measured 2.379 rad). The rigid
+                      body's forward axis is ~136 deg from the robot's.
+  Marker-to-body      (-0.07, -0.01) m, from last week's in-place
+                      rotation runs: the robot turns about a point
+                      ~7 cm behind the marker centre.
+  Command signs       +1 for yaw and lateral (checked on pipeline runs).
+
+
+----------------------------------------------------------------------
+4. PHASE 0 EXPERIMENTS
+----------------------------------------------------------------------
+
+Attempt 1 (Fri, data/phase0_attemp1)
+  Settings: 6 segments (12 s), speeds up to 1.0 m/s per axis with no
+  combined limit, workspace +-4 m, raw model.
+  Without the yaw offset: E median 4.75 m, q 6.96 m, rho 12.2 m.
+  The numbers were meaningless: every command was modelled 136 deg
+  the wrong way.
+  With the yaw offset 2.379: E median 0.77 m, max 3.04 m, q 2.40 m,
+  rho 4.21 m. Not viable.
+
+Attempt 2 (Fri, data/phase0_attemp2)
+  Abandoned after two pilots when the course and settings changed.
+
+Attempt 3 (Fri, data/phase0) - the data used for everything below
+  Settings: speeds up to 0.5 m/s per axis, omega up to 1 rad/s, mat
+  workspace. Pilots ran 20 segments (40 s) because they were prepared
+  while T_SEGMENTS was 20; config.py was later set to 15.
+  14 of 15 pilots valid; pilot_vy_only_03 lost tracking for 0.15 s.
+  Pipeline runs (5 s each): E = 5-7.5 cm, so mocap, timing and the
+  model equations are correct.
+  Raw model: E median 1.49 m, max 5.06 m, q 3.51 m, rho 6.14 m.
+
+  By pilot type (three gains):
+    forward/back only   7-10 m commanded    E 1.00-1.53 m   14-16 %/m
+    sideways only       9-11 m              E 1.23-1.77 m   13-16 %/m
+    mixed               13-17 m             E 0.60-3.30 m    4-22 %/m
+    turn in place       0 m                 E 0.25-0.36 m
+
+Earlier data set (recorded 2026-09-25, "Go2 Result Holonomic")
+  34 runs in 7 groups, each group one fixed command pattern repeated
+  4-5 times. Short runs (1-2.5 m) deviate 0.06-0.27 m; the 10 m and
+  7 m runs deviate 0.8-1.07 m. Per metre this is about the same as
+  Friday (~10 %/m), so the earlier data only looked better because
+  the runs were shorter.
+
+
+----------------------------------------------------------------------
+5. WAYS TRIED TO MINIMIZE E
+----------------------------------------------------------------------
+
+All numbers are for Friday's 14 valid pilots (40 s runs).
+Target: q < 0.29 m, rho < 0.5 m.
+
+ Method                                   E median   q      rho    Status
+ ---------------------------------------------------------------------------
+ Raw model (no correction)                 1.49     3.51   6.14   baseline
+ A. Yaw offset correction                  (attempt 1: rho 12.2 -> 4.21)  ADOPTED
+ B. Three gains 0.99/0.90/0.77             1.11     1.96   3.43   replaced by D
+ C. B + marker offset (-0.07,-0.01)        1.10     2.03   3.56   ADOPTED
+ D. Six direction gains (fair test)        0.71     1.48   2.59   ADOPTED
+      same pilots, not held out            0.66     1.42   2.49
+ E. Three scalars chosen to minimize E     1.11     1.74   3.05   rejected
+ F. Six scalars chosen to minimize E       0.84     1.20   2.09   rejected
+ G. D + constant offset per direction      0.67     1.28   2.24   tested only
+ H. G + side effects between axes          0.71     1.16   2.03   tested only
+ I. H + speed-squared term                 0.66     1.19   2.09   no gain
+ J. Function of current + previous command 0.75     1.02   1.78   tested only
+ K. Straight-walk corrections fitted on    0.61     1.54   2.69   tested only
+    the 09-25 data, tested on Friday
+ L. Learned model, ridge linear            -        0.91   1.59   tested only
+    (separate session, 15 pilots)
+ M. Learned model, small neural network    -        1.10   1.92   tested only
+    (separate session)
+
+Notes on each
+  A. The largest single improvement. Essential, not optional.
+  B. Measured from the single-axis pilots as achieved / commanded.
+     Checked independently on the 09-25 data: gentle arcs improved
+     from 0.19-0.27 m to 0.05-0.10 m, strong arcs from 1.0-1.2 m to
+     0.33-0.44 m.
+  C. Correct, but its effect is centimetres. It matters for in-place
+     turning (0.08-0.13 m -> 0.02-0.07 m on the 09-25 rotation runs).
+  D. Installed values: forward 1.05, backward 0.97, left 1.00,
+     right 0.74, turn left 0.82, turn right 0.79. Each is the least-
+     squares ratio of achieved to commanded over the steady part of
+     each segment (first 0.5 s skipped), 69-88 segments per direction.
+     The left/right sideways difference repeats in both data sets.
+     Also improved the short pipeline runs (forward 0.066 -> 0.015 m).
+  E, F. Rejected. The search picks unphysical values (e.g. forward
+     0.83 while the robot really does 0.99). It hedges by predicting
+     less movement, which makes 5 s runs 2-4 times worse and would
+     make the planner believe the robot is slower than it is.
+  G-J. A function from velocity to offset does exist (sec. 6). Using
+     the previous command as well gives the best simple model.
+  K. Fitted on one data set and tested on the other. The model
+     structure was chosen after seeing Friday's data, so 2.69 m is
+     slightly optimistic.
+
+Best result so far: q about 1.0 m, rho about 1.8 m (method J or L).
+That is roughly 3.5 times better than the raw model and still about
+3.5 times above the 0.5 m limit.
+
+
+----------------------------------------------------------------------
+6. WHAT WE LEARNED ABOUT THE ERROR
+----------------------------------------------------------------------
+
+Patterns in the robot's response (achieved vs. commanded)
+  Forward/backward  the achieved fraction FALLS as speed rises.
+                    Forward 1.13 / 1.11 / 1.05 / 0.98 at 0.1 / 0.2 /
+                    0.5 / 0.8 m/s; backward 1.07 / 1.01 / 0.96 / 0.86.
+  Sideways          left almost exact; right a constant ~0.78.
+  Turning           the achieved fraction RISES with speed: ~0.6 below
+                    0.25 rad/s, ~0.80 near 1 rad/s.
+  Side effects      fast forward walking also slides the robot left
+                    (+0.045 m/s at 0.5 m/s, +0.074 at 0.8) and turns
+                    it slightly left.
+  Lag               about 10-12 % of the previous segment's speed
+                    carries into the next segment (~0.23 s).
+
+Where the remaining error comes from (with the six gains)
+  - One 2 s segment, model started from the TRUE pose: error median
+    8 cm, 90 % below 23 cm.
+  - Average slip per segment: 1.5 cm forward, 2.2 cm left, whatever
+    the command direction.
+  - Heading is NOT the main cause: giving the model the true heading
+    at every segment start leaves q unchanged (1.42 -> 1.37 m).
+  - The error accumulates because nothing corrects the robot during
+    a run. Random parts grow with the square root of the number of
+    segments, steady slip grows in proportion. Over 20 segments,
+    8-23 cm per segment becomes about 1 m.
+  - To reach q < 0.29 m over 20 segments, each segment would need to
+    be within about 6 cm at the 90 % level, with no steady slip.
+
+The robot itself is repeatable
+  Identical commands repeated 4-5 times (09-25 data) differ from each
+  other by only 13-24 cm over 24 s / 9.6 m, about 2 % of distance.
+  The scalar model is off by 10-15 %. So most of the error is the
+  model being too simple, not randomness.
+
+Corrections to earlier statements
+  - "Heading drift is the main cause": wrong, see above.
+  - "The drift is random and cannot be calibrated": wrong. Most of it
+    is repeatable; simple models just cannot capture all of it.
+  The PI summary document still contains the second statement.
+
+
+----------------------------------------------------------------------
+7. CONCEPTUAL POINTS DISCUSSED
+----------------------------------------------------------------------
+
+- q < 0.29 m is not written in the protocol. It follows from
+  rho < goal radius (0.5 m) and rho = 1.75 x q. The protocol allows a
+  multiplier from 1.5 to 2; the 90th percentile is a code choice.
+- CP does not need a precise model to be valid. A poor model gives a
+  large q, the inflated obstacles block every path, and no plan is
+  accepted. A good model makes the method useful, not correct.
+- Pure RRT has the same accumulated error but never measures it. In
+  the paper's quadrotor study, plain RRT completes ~55 % of tasks and
+  the tightened version 80-100 %.
+- The paper has no hardware experiments, and its geometry is more
+  forgiving: world 25 x 25, goal radius 5, start-goal distance >= 15.
+  Scaled to the 5.6 m mat that is a goal radius of ~1.1 m (we use
+  0.5 m) and a start-goal distance of ~3.4 m (we use 5.1 m).
+- The paper only needs q to fit inside the goal. The protocol's extra
+  rho = 1.5-2 x q makes the bar nearly twice as high.
+
+
+----------------------------------------------------------------------
+8. CURRENT STATE AND OPEN ITEMS
+----------------------------------------------------------------------
+
+Settings on GitHub (commit 730025f)
+  dt 2 s, T_SEGMENTS 15, speeds 0.5 / 0.5 m/s and 1.0 rad/s,
+  goal radius 0.5 m, rho multiplier 1.75, yaw offset 2.404 rad,
+  marker offset (-0.07, -0.01) m, six gains as in sec. 5 D,
+  edge stop off, autonomous reset off, 5 candidates x 100 instances.
+
+Open items
+  1. config.py on the Mac is missing the six MODEL_GAIN lines
+     (uncommitted local edit); the code fails until they are restored.
+  2. Phase 0 is not "ready": rho (~2.5 m) is far above the goal
+     radius, pilot_vy_only_03 is invalid, review rows are "pending".
+  3. Pilots were run at 20 segments while config.py says 15. They
+     must match before a final Phase 0.
+  4. Decision for the PI. Options: larger goal radius (paper
+     proportions ~1.1 m), shorter runs / shorter course, lower target
+     probability, a learned dynamics model, or feedback during runs.
+  5. The PI summary document needs the corrections from sec. 6.
+  6. The repository is public and contains OptiTrack's NatNet files
+     in vendor/, which are under OptiTrack's own license.
+  7. Review items 4, 6, 7, 9 and 10 from sec. 1 are still open.
+
+Where things are
+  Code                 github.com/N1KX-x/holonomic_hardware_protocol
+  Friday's data        data/phase0 (attempt 3), phase0_attemp1,
+                       phase0_attemp2
+  Earlier data         "Go2 Result Holonomic" (recorded 09-25)
+  Learned-model work   data/E_comparison (separate session)
+  Lab procedure        RUN_INSTRUCTIONS.txt, TRAINING_INSTRUCTIONS.txt
+  Analysis scripts for sec. 5 E-K and sec. 6 were run from a temporary
+  folder and are not saved in the repository; their results are
+  recorded here.

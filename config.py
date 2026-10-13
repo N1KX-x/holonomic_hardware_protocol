@@ -136,23 +136,19 @@ MASTER_RANDOM_SEED = 20261009
 # Uploaded planner entry point. Expected callable contract is documented in
 # planner_adapter.py. Example: "my_rrt:create_candidates".
 PLANNER_ENTRY_POINT = ""
-OBSTACLE_COUNT_MIN = 4
-OBSTACLE_COUNT_MAX = 6
+OBSTACLE_COUNT_MIN = 2
+OBSTACLE_COUNT_MAX = 5
 OBSTACLE_RADIUS_MIN_M = 0.10
 OBSTACLE_RADIUS_MAX_M = 0.30
 RRT_MAX_ITERATIONS = 10000
-RRT_GOAL_SAMPLE_RATE = 0.20
+RRT_GOAL_SAMPLE_RATE = 0.30
 RRT_CONTROL_SAMPLES_PER_EXPANSION = 30
 RRT_COLLISION_SAMPLE_SPACING_M = 0.025
 RRT_POSITION_WEIGHT = 1.0
 RRT_HEADING_WEIGHT = 0.10
 
 
-# Phase 0 pilot --------------------------------------------------------------
-# Every phase0.py run is one pilot: an RRT plan from wherever the robot stands
-# to within GOAL_RADIUS_M of (GOAL_X_M, GOAL_Y_M). The plan only has to stay
-# inside the workspace (no margin at its edge).
-# Random-search steps phase0analyze.py uses to fit the gains and offsets.
+# Phase 0 pilot Minimizer
 PHASE0_FIT_ITERATIONS = 50000
 PILOT_HIGH_QUANTILE = 0.90
 RHO_MULTIPLIER = 1.05
