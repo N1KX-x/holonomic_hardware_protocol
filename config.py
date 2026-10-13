@@ -96,16 +96,13 @@ OMEGA_MAX_RADPS = 0.4
 TRANSLATIONAL_SPEED_MAX_MPS = None
 
 MODEL_GAIN_VX_POS = 1.05     # forward
-MODEL_GAIN_VX_NEG = 0.97     # backward
+MODEL_GAIN_VX_NEG = 1.00    # backward
 MODEL_GAIN_VY_POS = 1.00     # sideways to the robot's left
 MODEL_GAIN_VY_NEG = 0.74     # sideways to the robot's right
 MODEL_GAIN_OMEGA_POS = 0.82  # turning left (counterclockwise)
 MODEL_GAIN_OMEGA_NEG = 0.79  # turning right (clockwise)
 # Offsets of the same model, per command segment: modelled motion = gain *
-# commanded motion + offset, in the robot's frame (m, or rad for omega). An
-# axis whose command is zero stays zero. phase0analyze.py fits these and the
-# matching gains above (not MODEL_GAIN_VX_NEG: the planner never commands
-# backward vx) and lists the lines to enter here in phase0_analysis.txt.
+# commanded motion + offset, in the robot's frame (m, or rad for omega). 
 MODEL_OFFSET_VX_POS_M = 0.0
 MODEL_OFFSET_VY_POS_M = 0.0
 MODEL_OFFSET_VY_NEG_M = 0.0

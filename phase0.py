@@ -3,14 +3,6 @@
 
     python3 phase0.py              # preview a plan; no motion, nothing saved
     python3 phase0.py --execute    # read the robot pose, plan, run it, and save it
-
-Every successful call saves the next pilot_NNN (one more than the highest
-existing number) with its planned velocity commands, the raw data, and a plot
-of the planned and real trajectories (the same plot as in Phase 1). There is
-no fixed number of pilots: repeat the call as often as wanted, then run
-phase0analyze.py. A call that fails for any reason (the RRT finds no path,
-mocap loses the robot, Ctrl+C, ...) leaves nothing behind, so the next call
-uses the same number.
 """
 
 from __future__ import annotations

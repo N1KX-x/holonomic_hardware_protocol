@@ -2,15 +2,6 @@
 """Fit the nominal model to the Phase 0 pilots, then report E, q and rho.
 
     python3 phase0analyze.py
-
-For each of the five planned directions (+vx, +vy, -vy, +omega, -omega) the
-model is y = gain * x + offset: x is the motion a command asks for in one
-segment (command * dt, in the robot's frame) and y is the motion the model
-predicts. A seeded random search picks the gains and offsets that minimize q,
-the high quantile of E over all saved pilots. The E of every pilot, q and rho
-are then computed with them. Everything is written to phase0_analysis.txt,
-including the lines to enter in config.py; config.py itself is not changed.
-This program never accesses robot hardware.
 """
 
 from __future__ import annotations
@@ -229,7 +220,7 @@ def analyze() -> None:
     lines = [
         f"Phase 0 analysis, {datetime.now():%Y-%m-%d %H:%M}, {len(pilots)} pilot(s)",
         "",
-        f"Model per {config.DT_S:g} s segment: motion = gain * commanded motion + offset",
+        f"Model per {config.DT_S:g} s segment.",
         f"Random search ({config.PHASE0_FIT_ITERATIONS} steps) minimizing q, the {quantile_name}:",
         f"  q with the model now in config.py  {q_before:.3f} m",
         f"  q with the fitted model            {q:.3f} m",
