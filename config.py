@@ -1,14 +1,7 @@
-"""Single source of truth for every user-defined experiment parameter.
-
-Edit this file before using either ``phase0.py`` or ``main.py``.  Neither
-program accepts command-line overrides for experiment values; the CLI only
-selects a safe operation (validate, prepare, summarize, or execute).
-"""
-
 from pathlib import Path
 
 
-# Paths ---------------------------------------------------------------------
+# Paths
 PROJECT_ROOT = Path(__file__).resolve().parent
 DATA_ROOT = PROJECT_ROOT / "data"
 PHASE0_ROOT = DATA_ROOT / "phase0"
@@ -20,24 +13,17 @@ NOVA_DIR = Path.home() / "nova"
 NOVA_ENV_FILE = NOVA_DIR / "env.bash"
 
 
-# Safety --------------------------------------------------------------------
-# Both this value and --execute must be supplied before any robot command can
-# be published.  Leave False until the complete pipeline has been inspected.
+# Safety
 ALLOW_HARDWARE_EXECUTION = True
 REQUIRE_OPERATOR_CONFIRMATION = False
 TRACKING_START_TIMEOUT_S = 10.0
 MOCAP_LEAD_TIME_S = 0.5
 MOCAP_TRAIL_TIME_S = 0.5
-MAX_TRACKING_GAP_S = 0.10
-
-# Live safety stop. While a command sequence runs, the robot is stopped (and
-# the run fails) if its body center comes within EDGE_STOP_MARGIN_M of the
-# workspace edge, or if mocap has not tracked it for LIVE_TRACKING_TIMEOUT_S.
+MAX_TRACKING_GAP_S = 0.20
 EDGE_STOP_MARGIN_M = None
 LIVE_TRACKING_TIMEOUT_S = 0.50
 
-# Before every Phase 1 candidate the robot must stand this close to the
-# planned start pose, checked live with mocap.
+
 START_POSITION_TOLERANCE_M = 0.15
 START_HEADING_TOLERANCE_RAD = 0.17  # about 10 degrees
 
@@ -46,16 +32,16 @@ START_HEADING_TOLERANCE_RAD = 0.17  # about 10 degrees
 # False, the operator walks the robot back to the start between candidates.
 AUTONOMOUS_RESET_ENABLED = False
 RESET_POSITION_TOLERANCE_M = 0.10
-RESET_HEADING_TOLERANCE_RAD = 0.20
-RESET_COMMAND_DT_S = 2.0
+RESET_HEADING_TOLERANCE_RAD = 0.15
+RESET_COMMAND_DT_S = 0.5
 RESET_VX_MAX_MPS = 0.15
 RESET_VY_MAX_MPS = 0.10
 RESET_OMEGA_MAX_RADPS = 0.25
-RESET_MAX_ATTEMPTS = 8
+RESET_MAX_ATTEMPTS = 10
 RESET_SETTLE_TIME_S = 0.75
 
 
-# ROS / Unitree Go2 ---------------------------------------------------------
+# ROS / Unitree Go2
 CMD_VEL_TOPIC = "/cmd_vel_out"
 STOP_TOPIC = "/webrtc_req"
 COMMAND_HZ = 50.0
@@ -63,7 +49,7 @@ STOP_REPEATS = 5
 STOP_INTERVAL_S = 0.05
 
 
-# OptiTrack / Motive --------------------------------------------------------
+# OptiTrack / Motive
 MOCAP_CLIENT_IP = "192.168.0.241"
 MOCAP_SERVER_IP = "192.168.0.245"
 MOCAP_USE_MULTICAST = True
@@ -73,12 +59,17 @@ MOCAP_GROUND_X_SIGN = 1.0
 MOCAP_GROUND_Y_SIGN = -1.0
 
 
-# Measured calibration (replace after Phase 0) ------------------------------
+# Measured calibration
 YAW_OFFSET_RAD = 2.40395144164075
 MARKER_TO_BODY_X_M = -0.07
 MARKER_TO_BODY_Y_M = -0.01
 POSITIVE_YAW_COMMAND_SIGN = 1.0
 POSITIVE_LATERAL_COMMAND_SIGN = 1.0
+# yaw_offset_calibration.py drives straight forward with this single vx-only
+# command and prints the YAW_OFFSET_RAD it measures.
+YAW_CALIBRATION_ROOT = DATA_ROOT / "yaw_calibration"
+YAW_CALIBRATION_VX_MPS = 0.25
+YAW_CALIBRATION_DURATION_S = 5.0
 
 
 # Workspace in mocap world coordinates (replace after mapping capture area) --
@@ -164,7 +155,7 @@ RRT_HEADING_WEIGHT = 0.10
 # Random-search steps phase0analyze.py uses to fit the gains and offsets.
 PHASE0_FIT_ITERATIONS = 50000
 PILOT_HIGH_QUANTILE = 0.90
-RHO_MULTIPLIER = 1.10
+RHO_MULTIPLIER = 1.05
 
 
 # Training data for a learned dynamics model ---------------------------------
@@ -210,6 +201,8 @@ def validate() -> None:
     for name, value in positive.items():
         if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
             raise ValueError(f"{name} must be finite and positive")
+    if not (0 < YAW_CALIBRATION_VX_MPS <= VX_MAX_MPS) or YAW_CALIBRATION_DURATION_S <= 0:
+        raise ValueError("Yaw calibration needs 0 < vx <= VX_MAX_MPS and a positive duration")
     if WORKSPACE_X_MIN_M >= WORKSPACE_X_MAX_M or WORKSPACE_Y_MIN_M >= WORKSPACE_Y_MAX_M:
         raise ValueError("Workspace minimums must be smaller than maximums")
     if POSITIVE_YAW_COMMAND_SIGN not in (-1.0, 1.0):

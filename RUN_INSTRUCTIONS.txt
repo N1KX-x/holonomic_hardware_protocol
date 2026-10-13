@@ -35,8 +35,16 @@ publishes velocity commands that the Nova Go2 driver forwards to the robot.
     GOAL_X_M, GOAL_Y_M, GOAL_RADIUS_M
 
     Calibration (YAW_OFFSET_RAD, MARKER_TO_BODY_X_M / Y_M and the two
-    POSITIVE_*_COMMAND_SIGN values) must already be correct. phase0.py
-    no longer runs the pipeline checks that measured them.
+    POSITIVE_*_COMMAND_SIGN values) must be correct before Phase 0.
+    To measure YAW_OFFSET_RAD, put the robot where it has about 1.3 m
+    of free floor straight ahead and run:
+
+    python3 yaw_offset_calibration.py --execute
+
+    It walks straight forward (vx only, 0.25 m/s for 5 s), prints the
+    measured yaw offset, and saves the run in data/yaw_calibration/.
+    Copy the printed YAW_OFFSET_RAD line into config.py. Run it two or
+    three times; the values should agree within a few degrees.
 
     Recommended for the first runs:
     REQUIRE_OPERATOR_CONFIRMATION = True

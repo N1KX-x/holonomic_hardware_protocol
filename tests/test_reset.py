@@ -8,7 +8,10 @@ from hardware.reset_controller import return_command
 class ResetControllerTests(unittest.TestCase):
     def test_small_pose_error_is_inverted_by_nominal_step(self):
         pose = (0.0, 0.0, 0.2)
-        target = (0.10, -0.05, 0.30)
+        # Small enough to need no clamping, whatever the reset step and limits are.
+        dt = config.RESET_COMMAND_DT_S
+        target = (0.5*config.RESET_VX_MAX_MPS*dt, -0.25*config.RESET_VY_MAX_MPS*dt,
+                  0.2 + 0.4*config.RESET_OMEGA_MAX_RADPS*dt)
         command = return_command(pose, target)
         reached = step_holonomic(*pose, command.vx, command.vy,
                                  command.omega, command.dt)

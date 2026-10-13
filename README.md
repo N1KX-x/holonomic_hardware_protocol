@@ -45,6 +45,17 @@ Stand the robot on each corner of the usable area and press Enter. After four
 corners it prints the `WORKSPACE_*` lines for `config.py` (the largest
 axis-aligned rectangle inside them). It only reads mocap.
 
+## Yaw offset
+
+```bash
+python3 yaw_offset_calibration.py --execute
+```
+
+Drives one vx-only command (`YAW_CALIBRATION_VX_MPS` for
+`YAW_CALIBRATION_DURATION_S`) and prints the measured `YAW_OFFSET_RAD`: the
+direction of the travelled line minus the mean raw marker heading. Enter the
+value in `config.py` yourself. Without `--execute` it only previews.
+
 ## Phase 0 workflow
 
 Every call collects one pilot. Put the robot anywhere inside the boundary, at
