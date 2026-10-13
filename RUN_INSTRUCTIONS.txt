@@ -31,6 +31,13 @@ publishes velocity commands that the Nova Go2 driver forwards to the robot.
     TRANSLATIONAL_SPEED_MAX_MPS, GOAL_RADIUS_M, ROBOT_RADIUS_M,
     WORKSPACE_X_MIN_M / X_MAX_M / Y_MIN_M / Y_MAX_M
 
+    Goal of both phases (every Phase 0 pilot plans to it):
+    GOAL_X_M, GOAL_Y_M, GOAL_RADIUS_M
+
+    Calibration (YAW_OFFSET_RAD, MARKER_TO_BODY_X_M / Y_M and the two
+    POSITIVE_*_COMMAND_SIGN values) must already be correct. phase0.py
+    no longer runs the pipeline checks that measured them.
+
     Recommended for the first runs:
     REQUIRE_OPERATOR_CONFIRMATION = True
     (every collect then asks you to type the run/instance ID first)
@@ -64,77 +71,69 @@ publishes velocity commands that the Nova Go2 driver forwards to the robot.
 
 
 ----------------------------------------------------------------------
-2. PHASE 0 - PIPELINE CHECKS AND DEVIATION PILOT
+2. PHASE 0 - MAP BOUNDARY, PILOTS, AND MODEL FIT
 ----------------------------------------------------------------------
 
-Keep Nova running. Keep someone on the e-stop for every collect.
+Keep Nova running. Keep someone on the e-stop for every pilot.
 
-2.1 Create the Phase 0 plans (no robot motion; run only once):
+2.1 Measure the boundary of the map (reads mocap only; the robot is not
+    commanded):
 
-    python3 phase0.py prepare
+    python3 robot_coordinate_getter.py
 
-2.2 Run the three pipeline tests, one at a time:
+    Stand the robot on a corner of the usable area and press Enter;
+    repeat for all four corners, then type q. Paste the four printed
+    WORKSPACE_* lines into config.py. Phase 0 plans go right up to this
+    boundary and the real robot drifts away from its plan, so leave free
+    space (and mocap coverage) outside it.
 
-    python3 phase0.py collect pipeline_forward --execute
-    python3 phase0.py collect pipeline_arc --execute
-    python3 phase0.py collect pipeline_lateral --execute
+2.2 Enter the goal in config.py: GOAL_X_M, GOAL_Y_M and GOAL_RADIUS_M.
+    The goal and the Phase 1 start (START_X_M, START_Y_M) must be at
+    least ROBOT_RADIUS_M + GOAL_RADIUS_M inside the boundary.
 
-2.3 Check the command signs BEFORE any pilot run:
-      - pipeline_arc:     the robot should turn left (counterclockwise)
-      - pipeline_lateral: the robot should step to its own left
-    If either is wrong, flip POSITIVE_YAW_COMMAND_SIGN or
-    POSITIVE_LATERAL_COMMAND_SIGN in config.py, delete that run's folder
-    in data/phase0/raw/, and collect it again.
+2.3 Collect one pilot. Put the robot anywhere inside the boundary, more
+    than GOAL_RADIUS_M from the goal, not facing straight away from
+    it, and run:
 
-2.4 Get the yaw offset:
+    python3 phase0.py --execute
 
-    python3 phase0.py summarize
+    The program reads the robot's pose, plans an RRT path from there to
+    the goal region around random virtual obstacles, prints the velocity
+    commands, runs them, and saves everything as the next pilot:
 
-    Status will be "pending" at this point; that is expected.
-    Copy yaw_offset_estimate_rad from data/phase0/phase0_results.csv into
-    YAW_OFFSET_RAD in config.py. Also enter the measured marker-to-body
-    offset in MARKER_TO_BODY_X_M and MARKER_TO_BODY_Y_M.
+    data/phase0/pilot_001/plan.csv       the velocity commands
+    data/phase0/pilot_001/problem.json   start, goal, obstacles, seeds
+    data/phase0/pilot_001/raw/           commands sent, mocap, publish log
+    data/phase0/pilot_001/trajectory.png planned and real trajectory,
+                                         drawn like the Phase 1 plots
 
-2.5 Inspect the pipeline runs (plot data/phase0/raw/<run>/mocap.csv against
-    the nominal path). Then open data/phase0/pipeline_review.csv and change
-    all six statuses from "pending" to "pass":
-    pipeline_forward, pipeline_arc, pipeline_lateral,
-    clock_sync, yaw_sign, lateral_sign
+    Repeat 2.3 as many times as you want; there is no fixed number. To
+    see an example plan without moving the robot, leave out --execute.
 
-2.6 Run the 15 pilot runs. Some travel up to ~3 m from where they start,
-    so begin each one near the middle of the capture area.
+    If a run fails (the RRT finds no path, mocap loses the robot, you
+    press Ctrl+C, ...) it prints "Failed: ..." and saves nothing. Just run
+    the command again; it uses the same pilot number.
 
-    python3 phase0.py collect pilot_vx_only_01 --execute
-    python3 phase0.py collect pilot_vx_only_02 --execute
-    python3 phase0.py collect pilot_vx_only_03 --execute
-    python3 phase0.py collect pilot_vy_only_01 --execute
-    python3 phase0.py collect pilot_vy_only_02 --execute
-    python3 phase0.py collect pilot_vy_only_03 --execute
-    python3 phase0.py collect pilot_omega_only_01 --execute
-    python3 phase0.py collect pilot_omega_only_02 --execute
-    python3 phase0.py collect pilot_omega_only_03 --execute
-    python3 phase0.py collect pilot_mixed_01 --execute
-    python3 phase0.py collect pilot_mixed_02 --execute
-    python3 phase0.py collect pilot_mixed_03 --execute
-    python3 phase0.py collect pilot_mixed_04 --execute
-    python3 phase0.py collect pilot_mixed_05 --execute
-    python3 phase0.py collect pilot_mixed_06 --execute
+2.4 When you have enough pilots, fit the model (no robot needed):
 
-2.7 Summarize again:
+    python3 phase0analyze.py
 
-    python3 phase0.py summarize
+    It searches for the gain and offset of each direction (+vx, +vy, -vy,
+    +omega, -omega) that minimize q, and prints the gains, the offsets,
+    E of every pilot, q and rho. The same text is saved as
+    data/phase0/phase0_analysis.txt. It does NOT change config.py: to use
+    the numbers, copy the MODEL_GAIN_* and MODEL_OFFSET_* lines from the
+    text file into config.py. You can collect more pilots and run it
+    again at any time; it always fits from scratch.
 
-    Phase 0 is done when data/phase0/phase0_results.csv says "ready".
-    If it says "pending", read its "failures" column.
-    If rho_m is not smaller than goal_radius_m, the protocol's options are
+    Phase 0 is done when it prints "Status: ready" and config.py holds
+    those lines (main.py validate checks this).
+    If rho is not smaller than GOAL_RADIUS_M, the protocol's options are
     a shorter T, lower speeds, or a larger goal radius. Any of these means
-    running Phase 0 again in a fresh data folder.
+    collecting the pilots again in a fresh data folder.
 
-If a Phase 0 collect fails, its folder stays and collect will not
-overwrite it. If that folder has no commands.csv, or commands.csv has only
-its header row, no motion command was sent; you can delete the folder and
-collect again. Otherwise the robot moved, and whether to rerun that run is
-your decision (the protocol does not say).
+A data/phase0 folder from the earlier Phase 0 (it contains
+plan_manifest.csv) is refused. Rename it, for example to phase0_old.
 
 
 ----------------------------------------------------------------------
@@ -235,6 +234,7 @@ SAFETY NOTES
 ----------------------------------------------------------------------
 
 - The safety stop uses the workspace in config.py (the rectangle inside
-  the measured mat corners). Phase 0 runs must also start inside it, at
-  least 0.3 m from its edges, or they stop immediately.
+  the measured corners). It is off while EDGE_STOP_MARGIN_M = None. If
+  you turn it on, Phase 0 pilots that come within that margin of the
+  boundary are stopped and count as failed runs.
 - Keep someone on the e-stop anyway: the safety stop depends on mocap.

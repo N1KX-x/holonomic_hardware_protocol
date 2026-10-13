@@ -1,4 +1,5 @@
 import math
+import random
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,7 +8,8 @@ from unittest import mock
 import config
 from hardware.collector import latest_sample, safety_problem
 from hardware.start_check import start_offset
-from planner import plan_candidate, sample_problem
+from planner import _sample_control, plan_candidate, sample_problem
+from robot_coordinate_getter import inner_rectangle
 
 
 class FixedCourseTests(unittest.TestCase):
@@ -25,11 +27,25 @@ class FixedCourseTests(unittest.TestCase):
         self.assertNotEqual(first.obstacles, second.obstacles)
 
     def test_course_is_plannable_with_enough_segments(self):
-        # Long horizon, so this checks the course geometry rather than T_SEGMENTS.
-        with mock.patch.object(config, "T_SEGMENTS", 12):
+        # Long horizon (24 s), so this checks the course geometry rather than T_SEGMENTS.
+        with mock.patch.object(config, "T_SEGMENTS", math.ceil(24.0 / config.DT_S)):
             problem = sample_problem(1, config.MASTER_RANDOM_SEED + 10000, 0.2)
             plan = plan_candidate(problem, config.MASTER_RANDOM_SEED + 10001, 0.2)
         self.assertIsNotNone(plan)
+
+    def test_planner_never_commands_backward_vx(self):
+        rng = random.Random(7)
+        controls = [_sample_control(rng) for _ in range(2000)]
+        self.assertTrue(all(vx >= 0.0 for vx, _, _ in controls))
+        # Sideways and turning still use both directions.
+        self.assertTrue(any(vy < 0.0 for _, vy, _ in controls))
+        self.assertTrue(any(omega < 0.0 for _, _, omega in controls))
+
+
+class BoundaryTests(unittest.TestCase):
+    def test_inner_rectangle_of_measured_mat_corners(self):
+        corners = [(2.454, -3.039), (2.231, 2.903), (-3.587, 2.776), (-3.362, -2.408)]
+        self.assertEqual(inner_rectangle(corners), (-3.362, 2.231, -2.408, 2.776))
 
 
 class SafetyStopTests(unittest.TestCase):

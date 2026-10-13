@@ -60,13 +60,14 @@ def _find_run(run_id: str) -> Path | None:
     return None
 
 
-def plot_candidate(row: dict, plan_path: Path, run_dir: Path | None, output: Path) -> Path:
+def plot_candidate(row: dict, plan_path: Path, run_dir: Path | None, output: Path,
+                   run_id: str | None = None) -> Path:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.patches import Circle, Rectangle
 
-    run_id = f"{row['instance']}_{plan_path.stem}"
+    run_id = run_id or f"{row['instance']}_{plan_path.stem}"
     rho = float(row["rho_m"])
     robot_radius = float(row["robot_radius_m"])
     goal_radius = float(row["goal_radius_m"])
@@ -95,12 +96,15 @@ def plot_candidate(row: dict, plan_path: Path, run_dir: Path | None, output: Pat
         axis.add_patch(Circle(center, obstacle["radius"] + robot_radius, fill=False,
                               edgecolor="dimgray", linestyle="--", linewidth=1.2,
                               label="Obstacle + robot radius"))
-        axis.add_patch(Circle(center, obstacle["radius"] + robot_radius + rho, fill=False,
-                              edgecolor="darkorange", linestyle="--", linewidth=1.2,
-                              label="Obstacle + robot radius + ρ (planner limit)"))
+        if rho > 0:
+            axis.add_patch(Circle(center, obstacle["radius"] + robot_radius + rho, fill=False,
+                                  edgecolor="darkorange", linestyle="--", linewidth=1.2,
+                                  label="Obstacle + robot radius + ρ (planner limit)"))
     axis.add_patch(Circle(goal, goal_radius, color="gold", alpha=0.25, label="Goal region"))
-    axis.add_patch(Circle(goal, goal_radius - rho, fill=False, edgecolor="darkgoldenrod",
-                          linestyle="--", linewidth=1.2, label="Goal shrunk by ρ"))
+    # Phase 0 pilots are planned before any rho exists.
+    if rho > 0:
+        axis.add_patch(Circle(goal, goal_radius - rho, fill=False, edgecolor="darkgoldenrod",
+                              linestyle="--", linewidth=1.2, label="Goal shrunk by ρ"))
     axis.add_patch(Circle(planned_start[:2], config.START_REGION_RADIUS_M, color="green",
                           alpha=0.10, label="Start region"))
 

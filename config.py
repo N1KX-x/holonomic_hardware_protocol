@@ -95,38 +95,45 @@ WORKSPACE_Y_MAX_M = 2.776
 ROBOT_RADIUS_M = 0.30
 
 
-# Nominal model and command limits ------------------------------------------
-DT_S = 2.0
-T_SEGMENTS = 15
-VX_MAX_MPS = 0.5
-VY_MAX_MPS = 0.5
-OMEGA_MAX_RADPS = 1.0
+
+DT_S = 0.5
+T_SEGMENTS = 40
+VX_MAX_MPS = 1.0
+VY_MAX_MPS = 1.0
+OMEGA_MAX_RADPS = 0.4
 # Optional combined translational limit. Set None if the interface has none.
 TRANSLATIONAL_SPEED_MAX_MPS = None
-# Calibrated nominal model (protocol open item 4): the model predicts the robot
-# achieving these fractions of each commanded velocity, separately for each of
-# the six directions. Measured per segment from the 14 valid Phase 0 pilots of
-# 2026-10-09; last week's runs agree (e.g. -vy 0.77, +vy 0.97). Set all to 1.0
-# for the raw model.
+
 MODEL_GAIN_VX_POS = 1.05     # forward
 MODEL_GAIN_VX_NEG = 0.97     # backward
 MODEL_GAIN_VY_POS = 1.00     # sideways to the robot's left
 MODEL_GAIN_VY_NEG = 0.74     # sideways to the robot's right
 MODEL_GAIN_OMEGA_POS = 0.82  # turning left (counterclockwise)
 MODEL_GAIN_OMEGA_NEG = 0.79  # turning right (clockwise)
+# Offsets of the same model, per command segment: modelled motion = gain *
+# commanded motion + offset, in the robot's frame (m, or rad for omega). An
+# axis whose command is zero stays zero. phase0analyze.py fits these and the
+# matching gains above (not MODEL_GAIN_VX_NEG: the planner never commands
+# backward vx) and lists the lines to enter here in phase0_analysis.txt.
+MODEL_OFFSET_VX_POS_M = 0.0
+MODEL_OFFSET_VY_POS_M = 0.0
+MODEL_OFFSET_VY_NEG_M = 0.0
+MODEL_OFFSET_OMEGA_POS_RAD = 0.0
+MODEL_OFFSET_OMEGA_NEG_RAD = 0.0
 
 
 # Planning ------------------------------------------------------------------
-GOAL_RADIUS_M = 0.50
+GOAL_RADIUS_M = 1.00
 START_REGION_RADIUS_M = 0.50
-# Fixed start and goal centers for every instance (only obstacles are random).
-# Each is 0.9 m in from its workspace corner, which leaves room for the robot
-# radius plus any viable rho (< GOAL_RADIUS_M). Set START_X_M = None to sample
-# start and goal at random instead.
-START_X_M = 1.331
-START_Y_M = -1.508
-GOAL_X_M = -2.462
-GOAL_Y_M = 1.876
+# Fixed start and goal centers for every Phase 1 instance (only obstacles are
+# random). Each is 1.35 m in from its workspace corner, which leaves room for
+# the robot radius plus any viable rho (< GOAL_RADIUS_M). Set START_X_M = None
+# to sample start and goal at random instead. Phase 0 pilots use the same goal
+# and GOAL_RADIUS_M, but start wherever the robot stands.
+START_X_M = 0.881
+START_Y_M = -1.058
+GOAL_X_M = -2.012
+GOAL_Y_M = 1.426
 # None makes the robot start facing the goal.
 START_THETA_RAD = None
 # PHASE0_RESULTS_CSV supplies the frozen rho used by main.py. This fallback is
@@ -150,18 +157,14 @@ RRT_POSITION_WEIGHT = 1.0
 RRT_HEADING_WEIGHT = 0.10
 
 
-# Phase 0 verification and pilot --------------------------------------------
-PIPELINE_TEST_DURATION_S = 5.0
-PIPELINE_FORWARD_VX_MPS = 0.25
-PIPELINE_ARC_VX_MPS = 0.20
-PIPELINE_ARC_OMEGA_RADPS = 0.25
-PIPELINE_LATERAL_VY_MPS = 0.15
-PILOT_RUNS_VX_ONLY = 3
-PILOT_RUNS_VY_ONLY = 3
-PILOT_RUNS_OMEGA_ONLY = 3
-PILOT_RUNS_MIXED = 6
+# Phase 0 pilot --------------------------------------------------------------
+# Every phase0.py run is one pilot: an RRT plan from wherever the robot stands
+# to within GOAL_RADIUS_M of (GOAL_X_M, GOAL_Y_M). The plan only has to stay
+# inside the workspace (no margin at its edge).
+# Random-search steps phase0analyze.py uses to fit the gains and offsets.
+PHASE0_FIT_ITERATIONS = 20000
 PILOT_HIGH_QUANTILE = 0.90
-RHO_MULTIPLIER = 1.75
+RHO_MULTIPLIER = 1.10
 
 
 # Training data for a learned dynamics model ---------------------------------
@@ -215,8 +218,11 @@ def validate() -> None:
         raise ValueError("POSITIVE_LATERAL_COMMAND_SIGN must be -1.0 or 1.0")
     if not 0.0 < PILOT_HIGH_QUANTILE < 1.0:
         raise ValueError("PILOT_HIGH_QUANTILE must be between zero and one")
-    if PILOT_RUNS_VX_ONLY + PILOT_RUNS_VY_ONLY + PILOT_RUNS_OMEGA_ONLY + PILOT_RUNS_MIXED < 1:
-        raise ValueError("At least one pilot run is required")
+    if not (WORKSPACE_X_MIN_M <= GOAL_X_M <= WORKSPACE_X_MAX_M
+            and WORKSPACE_Y_MIN_M <= GOAL_Y_M <= WORKSPACE_Y_MAX_M):
+        raise ValueError("The goal must be inside the workspace")
+    if not isinstance(PHASE0_FIT_ITERATIONS, int) or PHASE0_FIT_ITERATIONS < 1:
+        raise ValueError("PHASE0_FIT_ITERATIONS must be a positive integer")
     reset_positive = {
         "RESET_POSITION_TOLERANCE_M": RESET_POSITION_TOLERANCE_M,
         "RESET_HEADING_TOLERANCE_RAD": RESET_HEADING_TOLERANCE_RAD,
@@ -241,6 +247,11 @@ def validate() -> None:
         value = globals()[name]
         if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
             raise ValueError(f"{name} must be finite and positive")
+    for name in ("MODEL_OFFSET_VX_POS_M", "MODEL_OFFSET_VY_POS_M", "MODEL_OFFSET_VY_NEG_M",
+                 "MODEL_OFFSET_OMEGA_POS_RAD", "MODEL_OFFSET_OMEGA_NEG_RAD"):
+        value = globals()[name]
+        if not isinstance(value, (int, float)) or not math.isfinite(value):
+            raise ValueError(f"{name} must be finite")
     safety_positive = {
         "LIVE_TRACKING_TIMEOUT_S": LIVE_TRACKING_TIMEOUT_S,
         "START_POSITION_TOLERANCE_M": START_POSITION_TOLERANCE_M,

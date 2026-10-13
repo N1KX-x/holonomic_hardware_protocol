@@ -52,26 +52,52 @@ def _inside_workspace(x: float, y: float, clearance: float = 0.0) -> bool:
     )
 
 
-def _point_is_free(x: float, y: float, obstacles: tuple[Circle, ...], rho: float) -> bool:
-    total_clearance = config.ROBOT_RADIUS_M + rho
-    if not _inside_workspace(x, y, total_clearance):
+def _point_is_free(x: float, y: float, obstacles: tuple[Circle, ...],
+                   clearance: float, edge_clearance: float) -> bool:
+    if not _inside_workspace(x, y, edge_clearance):
         return False
     return all(math.hypot(x-obstacle.x, y-obstacle.y)
-               > obstacle.radius + total_clearance
+               > obstacle.radius + clearance
                for obstacle in obstacles)
 
 
 def _command_is_free(start, vx: float, vy: float, omega: float,
-                     obstacles: tuple[Circle, ...], rho: float) -> bool:
+                     obstacles: tuple[Circle, ...],
+                     clearance: float, edge_clearance: float) -> bool:
     """Sample the exact curved nominal trajectory, not its endpoint chord."""
     path_length_bound = math.hypot(vx, vy) * config.DT_S
     samples = max(1, math.ceil(path_length_bound / config.RRT_COLLISION_SAMPLE_SPACING_M))
     for index in range(samples + 1):
         elapsed = config.DT_S * index / samples
         x, y, _ = nominal_step(*start, Command(0, vx, vy, omega, config.DT_S), config, elapsed)
-        if not _point_is_free(x, y, obstacles, rho):
+        if not _point_is_free(x, y, obstacles, clearance, edge_clearance):
             return False
     return True
+
+
+def _sample_obstacles(rng: random.Random, start, goal, goal_radius: float,
+                      rho: float) -> tuple[Circle, ...] | None:
+    """Draw one obstacle layout clear of the start and goal regions, or None if it does not fit."""
+    count = rng.randint(config.OBSTACLE_COUNT_MIN, config.OBSTACLE_COUNT_MAX)
+    obstacles: list[Circle] = []
+    for _ in range(count):
+        for _ in range(1000):
+            radius = rng.uniform(config.OBSTACLE_RADIUS_MIN_M,
+                                 config.OBSTACLE_RADIUS_MAX_M)
+            x = rng.uniform(config.WORKSPACE_X_MIN_M + radius,
+                            config.WORKSPACE_X_MAX_M - radius)
+            y = rng.uniform(config.WORKSPACE_Y_MIN_M + radius,
+                            config.WORKSPACE_Y_MAX_M - radius)
+            protected_radius = radius + config.ROBOT_RADIUS_M + rho
+            protects_start = math.hypot(x-start[0], y-start[1]) <= protected_radius + config.START_REGION_RADIUS_M
+            protects_goal = math.hypot(x-goal[0], y-goal[1]) <= protected_radius + goal_radius
+            overlaps = any(math.hypot(x-o.x, y-o.y) <= radius + o.radius for o in obstacles)
+            if not (protects_start or protects_goal or overlaps):
+                obstacles.append(Circle(x, y, radius))
+                break
+        else:
+            return None
+    return tuple(obstacles)
 
 
 def sample_problem(instance: int, seed: int, rho: float) -> Problem:
@@ -98,29 +124,27 @@ def sample_problem(instance: int, seed: int, rho: float) -> Problem:
             goal_x, goal_y = config.GOAL_X_M, config.GOAL_Y_M
             start_theta = (math.atan2(goal_y-start_y, goal_x-start_x)
                            if config.START_THETA_RAD is None else config.START_THETA_RAD)
-        count = rng.randint(config.OBSTACLE_COUNT_MIN, config.OBSTACLE_COUNT_MAX)
-        obstacles: list[Circle] = []
-        for _ in range(count):
-            for _ in range(1000):
-                radius = rng.uniform(config.OBSTACLE_RADIUS_MIN_M,
-                                     config.OBSTACLE_RADIUS_MAX_M)
-                x = rng.uniform(config.WORKSPACE_X_MIN_M + radius,
-                                config.WORKSPACE_X_MAX_M - radius)
-                y = rng.uniform(config.WORKSPACE_Y_MIN_M + radius,
-                                config.WORKSPACE_Y_MAX_M - radius)
-                circle = Circle(x, y, radius)
-                protected_radius = radius + config.ROBOT_RADIUS_M + rho
-                protects_start = math.hypot(x-start_x, y-start_y) <= protected_radius + config.START_REGION_RADIUS_M
-                protects_goal = math.hypot(x-goal_x, y-goal_y) <= protected_radius + config.GOAL_RADIUS_M
-                overlaps = any(math.hypot(x-o.x, y-o.y) <= radius + o.radius for o in obstacles)
-                if not (protects_start or protects_goal or overlaps):
-                    obstacles.append(circle)
-                    break
-            else:
-                break
-        if len(obstacles) == count:
+        obstacles = _sample_obstacles(rng, (start_x, start_y), (goal_x, goal_y),
+                                      config.GOAL_RADIUS_M, rho)
+        if obstacles is not None:
             return Problem(instance, start_x, start_y, start_theta, goal_x, goal_y,
-                           tuple(obstacles), seed)
+                           obstacles, seed)
+    raise RuntimeError("Could not sample a valid planning problem")
+
+
+def sample_pilot_problem(number: int, seed: int,
+                         start: tuple[float, float, float]) -> Problem:
+    """Phase 0 problem: the measured start pose, the configured goal, random obstacles.
+
+    rho is not known in Phase 0, so obstacles keep clear of the regions by the
+    robot radius only.
+    """
+    rng = random.Random(seed)
+    goal = (config.GOAL_X_M, config.GOAL_Y_M)
+    for _ in range(10000):
+        obstacles = _sample_obstacles(rng, start, goal, config.GOAL_RADIUS_M, 0.0)
+        if obstacles is not None:
+            return Problem(number, *start, *goal, obstacles, seed)
     raise RuntimeError("Could not sample a valid planning problem")
 
 
@@ -142,13 +166,15 @@ def _sample_target(rng: random.Random, problem: Problem):
 
 def _sample_control(rng: random.Random) -> tuple[float, float, float]:
     # Include zero and limit values regularly while preserving continuous variety.
-    def component(limit: float) -> float:
-        choices = (-limit, -0.5*limit, 0.0, 0.5*limit, limit)
-        return rng.choice(choices) if rng.random() < 0.65 else rng.uniform(-limit, limit)
+    def component(limit: float, lowest: float) -> float:
+        choices = [value for value in (-limit, -0.5*limit, 0.0, 0.5*limit, limit)
+                   if value >= lowest]
+        return rng.choice(choices) if rng.random() < 0.65 else rng.uniform(lowest, limit)
     for _ in range(100):
-        vx = component(config.VX_MAX_MPS)
-        vy = component(config.VY_MAX_MPS)
-        omega = component(config.OMEGA_MAX_RADPS)
+        # vx is never negative: the robot only walks forward and turns to go back.
+        vx = component(config.VX_MAX_MPS, 0.0)
+        vy = component(config.VY_MAX_MPS, -config.VY_MAX_MPS)
+        omega = component(config.OMEGA_MAX_RADPS, -config.OMEGA_MAX_RADPS)
         limit = config.TRANSLATIONAL_SPEED_MAX_MPS
         if limit is None or math.hypot(vx, vy) <= limit:
             return vx, vy, omega
@@ -173,7 +199,17 @@ def plan_candidate(problem: Problem, seed: int, rho: float) -> list[Command] | N
     """Return a fixed-horizon control sequence, or None without resampling."""
     if not 0.0 < rho < config.GOAL_RADIUS_M:
         raise ValueError("rho must satisfy 0 < rho < GOAL_RADIUS_M")
-    goal_radius = config.GOAL_RADIUS_M - rho
+    clearance = config.ROBOT_RADIUS_M + rho
+    return _plan(problem, seed, config.GOAL_RADIUS_M - rho, clearance, clearance)
+
+
+def plan_pilot(problem: Problem, seed: int) -> list[Command] | None:
+    """Phase 0 plan, or None: no rho yet, and the body center may reach the workspace edge."""
+    return _plan(problem, seed, config.GOAL_RADIUS_M, config.ROBOT_RADIUS_M, 0.0)
+
+
+def _plan(problem: Problem, seed: int, goal_radius: float,
+          clearance: float, edge_clearance: float) -> list[Command] | None:
     rng = random.Random(seed)
     root = Node((problem.start_x, problem.start_y, problem.start_theta), None, None, 0)
     nodes = [root]
@@ -188,7 +224,7 @@ def plan_candidate(problem: Problem, seed: int, rho: float) -> list[Command] | N
             vx, vy, omega = _sample_control(rng)
             nxt = nominal_step(*nearest.state, Command(0, vx, vy, omega, config.DT_S), config)
             if not _command_is_free(nearest.state, vx, vy, omega,
-                                    problem.obstacles, rho):
+                                    problem.obstacles, clearance, edge_clearance):
                 continue
             score = _distance(nxt, target)
             if best is None or score < best[0]:

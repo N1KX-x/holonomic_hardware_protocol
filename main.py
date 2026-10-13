@@ -31,7 +31,7 @@ RESET_ROOT = config.PHASE1_ROOT / "resets"
 def load_phase0() -> float:
     if not config.PHASE0_RESULTS_CSV.is_file():
         raise FileNotFoundError(
-            f"Run phase0.py summarize first; missing {config.PHASE0_RESULTS_CSV}"
+            f"Run phase0analyze.py first; missing {config.PHASE0_RESULTS_CSV}"
         )
     with config.PHASE0_RESULTS_CSV.open(newline="", encoding="utf-8") as source:
         rows = list(csv.DictReader(source))
@@ -54,6 +54,11 @@ def load_phase0() -> float:
         "model_gain_vy_neg": config.MODEL_GAIN_VY_NEG,
         "model_gain_omega_pos": config.MODEL_GAIN_OMEGA_POS,
         "model_gain_omega_neg": config.MODEL_GAIN_OMEGA_NEG,
+        "model_offset_vx_pos_m": config.MODEL_OFFSET_VX_POS_M,
+        "model_offset_vy_pos_m": config.MODEL_OFFSET_VY_POS_M,
+        "model_offset_vy_neg_m": config.MODEL_OFFSET_VY_NEG_M,
+        "model_offset_omega_pos_rad": config.MODEL_OFFSET_OMEGA_POS_RAD,
+        "model_offset_omega_neg_rad": config.MODEL_OFFSET_OMEGA_NEG_RAD,
         "robot_radius_m": config.ROBOT_RADIUS_M,
         "workspace_x_min_m": config.WORKSPACE_X_MIN_M,
         "workspace_x_max_m": config.WORKSPACE_X_MAX_M,

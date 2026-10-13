@@ -1,270 +1,197 @@
 #!/usr/bin/env python3
-"""Prepare, collect, and summarize pipeline checks and the deviation pilot.
+"""Collect one Phase 0 pilot per call: an RRT plan run from wherever the robot stands.
 
-Safe commands such as ``prepare`` and ``summarize`` never access hardware.
-``collect`` additionally requires --execute and ALLOW_HARDWARE_EXECUTION=True.
-The final phase0_results.csv is the only Phase 0 file main.py consumes.
+    python3 phase0.py              # preview a plan; no motion, nothing saved
+    python3 phase0.py --execute    # read the robot pose, plan, run it, and save it
+
+Every successful call saves the next pilot_NNN (one more than the highest
+existing number) with its planned velocity commands, the raw data, and a plot
+of the planned and real trajectories (the same plot as in Phase 1). There is
+no fixed number of pilots: repeat the call as often as wanted, then run
+phase0analyze.py. A call that fails for any reason (the RRT finds no path,
+mocap loses the robot, Ctrl+C, ...) leaves nothing behind, so the next call
+uses the same number.
 """
 
 from __future__ import annotations
 
 import argparse
-import csv
+import json
 import math
 import random
-import statistics
+import re
+import shutil
 from pathlib import Path
 
 import config
-from core import (Command, load_sent_commands, process_execution, validate_commands,
-                  wrap_angle, write_candidate_csv)
+from core import Command, nominal_step, trace_execution, validate_commands, write_candidate_csv
+from planner import Problem, plan_pilot, sample_pilot_problem
 
 
-PLAN_DIR = config.PHASE0_ROOT / "plans"
-RAW_DIR = config.PHASE0_ROOT / "raw"
-METRICS_CSV = config.PHASE0_ROOT / "execution_metrics.csv"
-REVIEW_CSV = config.PHASE0_ROOT / "pipeline_review.csv"
-MANIFEST_CSV = config.PHASE0_ROOT / "plan_manifest.csv"
+PILOT_PATTERN = re.compile(r"^pilot_(\d+)$")
+# Left by the earlier Phase 0 (fixed list of random-command pilots).
+OLD_PHASE0_MARKER = "plan_manifest.csv"
 
 
-def _pipeline_plans():
-    duration = config.PIPELINE_TEST_DURATION_S
+def pilot_dirs(root: Path | None = None) -> list[Path]:
+    """Saved pilot folders in number order."""
+    root = config.PHASE0_ROOT if root is None else root
+    found = [path for path in (root.iterdir() if root.is_dir() else ())
+             if path.is_dir() and PILOT_PATTERN.fullmatch(path.name)]
+    return sorted(found, key=lambda path: int(PILOT_PATTERN.fullmatch(path.name).group(1)))
+
+
+def next_pilot_number(root: Path | None = None) -> int:
+    """One more than the highest saved pilot number."""
+    saved = pilot_dirs(root)
+    return int(PILOT_PATTERN.fullmatch(saved[-1].name).group(1)) + 1 if saved else 1
+
+
+def reject_old_phase0(root: Path | None = None) -> None:
+    root = config.PHASE0_ROOT if root is None else root
+    if (root / OLD_PHASE0_MARKER).exists():
+        raise RuntimeError(f"{root} holds runs from the earlier Phase 0. Rename that "
+                           "folder (for example to phase0_old) and run again")
+
+
+def plan_pilot_run(number: int, pose, seed: int) -> tuple[Problem, list[Command]]:
+    """RRT plan from `pose` to the goal region; raises if this pose has no plan."""
+    x, y, _ = pose
+    if not (config.WORKSPACE_X_MIN_M <= x <= config.WORKSPACE_X_MAX_M
+            and config.WORKSPACE_Y_MIN_M <= y <= config.WORKSPACE_Y_MAX_M):
+        raise RuntimeError(f"Robot at x={x:.2f}, y={y:.2f} is outside the boundary")
+    distance = math.hypot(config.GOAL_X_M - x, config.GOAL_Y_M - y)
+    if distance <= config.GOAL_RADIUS_M:
+        raise RuntimeError(f"Robot is already {distance:.2f} m from the goal, inside its "
+                           f"{config.GOAL_RADIUS_M:g} m radius; start further away")
+    problem = sample_pilot_problem(number, seed, pose)
+    commands = plan_pilot(problem, seed + 1)
+    if commands is None:
+        raise RuntimeError("RRT found no path from this pose")
+    return problem, validate_commands(commands, config)
+
+
+def _problem_record(name: str, problem: Problem) -> dict:
     return {
-        "pipeline_forward": ("pipeline_forward", [Command(0, config.PIPELINE_FORWARD_VX_MPS, 0, 0, duration)]),
-        "pipeline_arc": ("pipeline_arc", [Command(0, config.PIPELINE_ARC_VX_MPS, 0,
-                                                    config.PIPELINE_ARC_OMEGA_RADPS, duration)]),
-        "pipeline_lateral": ("pipeline_lateral", [Command(0, 0, config.PIPELINE_LATERAL_VY_MPS, 0, duration)]),
+        "pilot": name,
+        "problem_seed": problem.problem_seed,
+        "rrt_seed": problem.problem_seed + 1,
+        "start": {"x": problem.start_x, "y": problem.start_y, "theta": problem.start_theta},
+        "goal": {"x": problem.goal_x, "y": problem.goal_y,
+                 "radius_m": config.GOAL_RADIUS_M},
+        "obstacles": [{"x": o.x, "y": o.y, "radius": o.radius} for o in problem.obstacles],
+        "robot_radius_m": config.ROBOT_RADIUS_M,
+        "workspace": {"x_min": config.WORKSPACE_X_MIN_M, "x_max": config.WORKSPACE_X_MAX_M,
+                      "y_min": config.WORKSPACE_Y_MIN_M, "y_max": config.WORKSPACE_Y_MAX_M},
+        "dt_s": config.DT_S,
+        "t_segments": config.T_SEGMENTS,
     }
 
 
-def _translation_limit(component_max: float) -> float:
-    """Largest single-axis speed allowed by both the axis and combined limits."""
-    combined = config.TRANSLATIONAL_SPEED_MAX_MPS
-    return component_max if combined is None else min(component_max, combined)
+def plot_pilot(pilot_dir: Path) -> Path:
+    """Draw one saved pilot like a Phase 1 candidate, into its own folder."""
+    from plot_phase1 import plot_candidate
+
+    with (pilot_dir / "problem.json").open(encoding="utf-8") as source:
+        record = json.load(source)
+    row = {
+        "start_x": record["start"]["x"], "start_y": record["start"]["y"],
+        "start_theta": record["start"]["theta"],
+        "goal_x": record["goal"]["x"], "goal_y": record["goal"]["y"],
+        "goal_radius_m": record["goal"]["radius_m"],
+        "robot_radius_m": record["robot_radius_m"],
+        "obstacles": json.dumps(record["obstacles"]),
+        "rho_m": 0.0,
+    }
+    return plot_candidate(row, pilot_dir / "plan.csv", pilot_dir / "raw",
+                          pilot_dir / "trajectory.png", run_id=pilot_dir.name)
 
 
-def _pilot_commands(group: str, rng: random.Random) -> list[Command]:
-    commands = []
-    for k in range(config.T_SEGMENTS):
-        if group == "vx_only":
-            limit = _translation_limit(config.VX_MAX_MPS)
-            vx, vy, omega = rng.uniform(-limit, limit), 0.0, 0.0
-        elif group == "vy_only":
-            limit = _translation_limit(config.VY_MAX_MPS)
-            vx, vy, omega = 0.0, rng.uniform(-limit, limit), 0.0
-        elif group == "omega_only":
-            vx, vy, omega = 0.0, 0.0, rng.uniform(-config.OMEGA_MAX_RADPS, config.OMEGA_MAX_RADPS)
-        else:
-            limit = config.TRANSLATIONAL_SPEED_MAX_MPS
-            for _ in range(1000):
-                vx = rng.uniform(-config.VX_MAX_MPS, config.VX_MAX_MPS)
-                vy = rng.uniform(-config.VY_MAX_MPS, config.VY_MAX_MPS)
-                if limit is None or math.hypot(vx, vy) <= limit:
-                    break
-            else:
-                raise RuntimeError("Could not sample a mixed command within TRANSLATIONAL_SPEED_MAX_MPS")
-            omega = rng.uniform(-config.OMEGA_MAX_RADPS, config.OMEGA_MAX_RADPS)
-        commands.append(Command(k, vx, vy, omega, config.DT_S))
-    return commands
+def _print_plan(name: str, problem: Problem, commands: list[Command]) -> None:
+    moving = [c for c in commands if (c.vx, c.vy, c.omega) != (0.0, 0.0, 0.0)]
+    print(f"{name}: from x={problem.start_x:.2f} m, y={problem.start_y:.2f} m, facing "
+          f"{math.degrees(problem.start_theta):.0f} deg, to within "
+          f"{config.GOAL_RADIUS_M:g} m of ({problem.goal_x:.2f}, {problem.goal_y:.2f})")
+    print(f"  {len(moving)} moving segments of {config.DT_S:g} s "
+          f"(then standing still until {len(commands) * config.DT_S:g} s), "
+          f"{len(problem.obstacles)} virtual obstacles")
+    print("    k      vx      vy   omega")
+    for command in moving:
+        print(f"  {command.k:3d}  {command.vx:+.3f}  {command.vy:+.3f}  {command.omega:+.3f}")
+    end = (problem.start_x, problem.start_y, problem.start_theta)
+    for command in commands:
+        end = nominal_step(*end, command, config)
+    print(f"  nominal end: x={end[0]:.2f} m, y={end[1]:.2f} m")
 
 
-def _build_plans() -> dict[str, tuple[str, list[Command]]]:
-    """Generate every Phase 0 plan and reject any the velocity runner would refuse."""
-    plans = _pipeline_plans()
-    rng = random.Random(config.MASTER_RANDOM_SEED)
-    groups = (
-        [("vx_only", config.PILOT_RUNS_VX_ONLY),
-         ("vy_only", config.PILOT_RUNS_VY_ONLY),
-         ("omega_only", config.PILOT_RUNS_OMEGA_ONLY),
-         ("mixed", config.PILOT_RUNS_MIXED)]
-    )
-    for group, count in groups:
-        for number in range(1, count + 1):
-            run_id = f"pilot_{group}_{number:02d}"
-            plans[run_id] = (group, _pilot_commands(group, rng))
-    for run_id, (_, commands) in plans.items():
-        try:
-            validate_commands(commands, config,
-                              require_main_horizon=run_id.startswith("pilot_"))
-        except ValueError as error:
-            raise ValueError(f"{run_id}: {error}") from error
-    return plans
-
-
-def prepare() -> None:
+def collect(execute: bool, preview_pose=None) -> None:
     config.validate()
-    if MANIFEST_CSV.exists():
-        raise FileExistsError(f"Phase 0 is already prepared: {MANIFEST_CSV}")
-    # Every plan is validated before any file is written, so a rejected plan
-    # never leaves a partial plans folder behind.
-    plans = _build_plans()
-    config.PHASE0_ROOT.mkdir(parents=True, exist_ok=True)
-    PLAN_DIR.mkdir(exist_ok=True)
-    with MANIFEST_CSV.open("x", newline="", encoding="utf-8") as target:
-        writer = csv.writer(target)
-        writer.writerow(["run_id", "kind", "motion_group", "candidate_csv", "status"])
-        for run_id, (group, commands) in plans.items():
-            path = PLAN_DIR / f"{run_id}.csv"
-            write_candidate_csv(path, commands)
-            writer.writerow([run_id, "pipeline" if run_id.startswith("pipeline_") else "pilot",
-                             group, path.relative_to(config.PROJECT_ROOT), "planned"])
-    with REVIEW_CSV.open("x", newline="", encoding="utf-8") as target:
-        writer = csv.writer(target)
-        writer.writerow(["test", "status", "operator_note"])
-        writer.writerow(["pipeline_forward", "pending", "Expect mainly along-track error; no large sideways error"])
-        writer.writerow(["pipeline_arc", "pending", "Nominal and actual arcs must turn the same direction"])
-        writer.writerow(["pipeline_lateral", "pending", "Actual lateral direction must match nominal"])
-        writer.writerow(["clock_sync", "pending", "Verify mocap and command timestamp synchronization"])
-        writer.writerow(["yaw_sign", "pending", "Positive omega increases corrected yaw"])
-        writer.writerow(["lateral_sign", "pending", "Positive vy moves robot left"])
-    print(f"Prepared Phase 0 plans in {PLAN_DIR}")
-    print(f"Before finalizing, change each status to pass in {REVIEW_CSV} after inspection.")
-
-
-def _manifest():
-    with MANIFEST_CSV.open(newline="", encoding="utf-8") as source:
-        return {row["run_id"]: row for row in csv.DictReader(source)}
-
-
-def collect(run_id: str, execute: bool) -> None:
+    reject_old_phase0()
+    number = next_pilot_number()
+    name = f"pilot_{number:03d}"
+    # A fresh seed every call, saved with the pilot: a failed call must not
+    # repeat the same obstacles and the same failed search.
+    seed = random.SystemRandom().randrange(1, 2**31)
     if not execute:
-        raise RuntimeError("Collection requires the explicit --execute flag")
-    rows = _manifest()
-    if run_id not in rows:
-        raise ValueError(f"Unknown Phase 0 run: {run_id}")
-    if config.REQUIRE_OPERATOR_CONFIRMATION:
-        answer = input(f"Execute {run_id} on the robot? Type the full run ID: ").strip()
-        if answer != run_id:
-            raise RuntimeError("Operator confirmation did not match")
+        pose = preview_pose or (config.START_X_M, config.START_Y_M, 0.0)
+        if pose[0] is None:
+            pose = ((config.WORKSPACE_X_MIN_M + config.WORKSPACE_X_MAX_M) / 2,
+                    (config.WORKSPACE_Y_MIN_M + config.WORKSPACE_Y_MAX_M) / 2, 0.0)
+        _print_plan(name, *plan_pilot_run(number, pose, seed))
+        print("Preview only. The real plan starts from the robot's measured pose. "
+              "Add --execute to run it.")
+        return
+    if not config.ALLOW_HARDWARE_EXECUTION:
+        raise RuntimeError("Hardware execution is disabled in config.py")
+    if config.EDGE_STOP_MARGIN_M is not None:
+        print(f"Note: EDGE_STOP_MARGIN_M = {config.EDGE_STOP_MARGIN_M} stops (and fails) "
+              "any pilot that comes this close to the boundary.")
     from hardware.collector import collect as collect_hardware
-    candidate = config.PROJECT_ROOT / rows[run_id]["candidate_csv"]
-    collect_hardware(candidate, RAW_DIR / run_id)
+    from hardware.start_check import read_pose
 
-
-def _quantile(values: list[float], probability: float) -> float:
-    ordered = sorted(values)
-    position = (len(ordered)-1)*probability
-    lower = math.floor(position)
-    upper = math.ceil(position)
-    if lower == upper:
-        return ordered[lower]
-    return ordered[lower] + (position-lower)*(ordered[upper]-ordered[lower])
-
-
-def _estimate_yaw_offset() -> float:
-    """Estimate marker-to-forward yaw from the straight pipeline run."""
-    run = RAW_DIR / "pipeline_forward"
-    commands = load_sent_commands(run / "commands.csv")
-    t0 = commands[0].t_send
-    tf = t0 + sum(command.dt for command in commands)
-    with (run / "mocap.csv").open(newline="", encoding="utf-8") as source:
-        rows = [row for row in csv.DictReader(source)
-                if row["tracked"].strip().lower() in {"1", "true", "yes"}
-                and t0 <= float(row["t"]) <= tf]
-    if len(rows) < 2:
-        raise ValueError("Not enough tracked samples for yaw-offset estimate")
-    line_heading = math.atan2(float(rows[-1]["y"])-float(rows[0]["y"]),
-                              float(rows[-1]["x"])-float(rows[0]["x"]))
-    sine = statistics.fmean(math.sin(float(row["theta_raw"])) for row in rows)
-    cosine = statistics.fmean(math.cos(float(row["theta_raw"])) for row in rows)
-    marker_heading = math.atan2(sine, cosine)
-    return wrap_angle(line_heading-marker_heading)
-
-
-def summarize() -> None:
-    config.validate()
-    rows = _manifest()
-    metrics = []
-    failures = []
-    for run_id, row in rows.items():
-        run_dir = RAW_DIR / run_id
-        if not run_dir.is_dir():
-            failures.append(f"missing:{run_id}")
-            continue
-        try:
-            metrics.append(process_execution(run_dir, row["motion_group"], config))
-        except (OSError, ValueError) as error:
-            failures.append(f"invalid:{run_id}:{error}")
-    with METRICS_CSV.open("w", newline="", encoding="utf-8") as target:
-        writer = csv.writer(target)
-        writer.writerow(["run_id", "motion_group", "max_deviation_m",
-                         "commanded_distance_m", "actual_distance_m",
-                         "commanded_actual_ratio", "initial_x_m", "initial_y_m",
-                         "initial_theta_rad"])
-        for item in metrics:
-            writer.writerow(item.__dict__.values())
-    pilots = [item for item in metrics if item.run_id.startswith("pilot_")]
-    expected_pilots = sum((config.PILOT_RUNS_VX_ONLY, config.PILOT_RUNS_VY_ONLY,
-                           config.PILOT_RUNS_OMEGA_ONLY, config.PILOT_RUNS_MIXED))
-    with REVIEW_CSV.open(newline="", encoding="utf-8") as source:
-        reviews = list(csv.DictReader(source))
-    review_passed = bool(reviews) and all(row["status"].strip().lower() == "pass" for row in reviews)
+    pose = read_pose()
+    if pose is None:
+        raise RuntimeError("Mocap is not tracking the robot")
+    problem, commands = plan_pilot_run(number, pose, seed)
+    _print_plan(name, problem, commands)
+    if config.REQUIRE_OPERATOR_CONFIRMATION:
+        answer = input(f"Execute {name} on the robot? Type {name}: ").strip()
+        if answer != name:
+            raise RuntimeError("Operator confirmation did not match")
+    pilot_dir = config.PHASE0_ROOT / name
+    pilot_dir.mkdir(parents=True)
     try:
-        yaw_estimate = _estimate_yaw_offset()
-    except (OSError, ValueError):
-        yaw_estimate = math.nan
-    if pilots:
-        deviations = [item.max_deviation_m for item in pilots]
-        q = _quantile(deviations, config.PILOT_HIGH_QUANTILE)
-        rho = config.RHO_MULTIPLIER*q
-    else:
-        deviations, q, rho = [], math.nan, math.nan
-    viable = bool(deviations) and q < rho < config.GOAL_RADIUS_M
-    ready = len(pilots) == expected_pilots and not failures and review_passed and viable
-    config.PHASE0_RESULTS_CSV.parent.mkdir(parents=True, exist_ok=True)
-    with config.PHASE0_RESULTS_CSV.open("w", newline="", encoding="utf-8") as target:
-        writer = csv.writer(target)
-        writer.writerow(["status", "pilot_count", "expected_pilot_count", "min_e_m",
-                         "median_e_m", "max_e_m", "quantile_probability", "q_estimate_m",
-                         "rho_m", "goal_radius_m", "dt_s", "t_segments",
-                         "yaw_offset_rad", "marker_to_body_x_m", "marker_to_body_y_m",
-                         "yaw_offset_estimate_rad",
-                         "model_gain_vx_pos", "model_gain_vx_neg", "model_gain_vy_pos",
-                         "model_gain_vy_neg", "model_gain_omega_pos", "model_gain_omega_neg",
-                         "vx_max_mps", "vy_max_mps", "omega_max_radps",
-                         "yaw_command_sign", "lateral_command_sign",
-                         "robot_radius_m",
-                         "workspace_x_min_m", "workspace_x_max_m",
-                         "workspace_y_min_m", "workspace_y_max_m",
-                         "failures"])
-        writer.writerow(["ready" if ready else "pending", len(pilots), expected_pilots,
-                         min(deviations) if deviations else "",
-                         statistics.median(deviations) if deviations else "",
-                         max(deviations) if deviations else "", config.PILOT_HIGH_QUANTILE,
-                         q if deviations else "", rho if deviations else "",
-                         config.GOAL_RADIUS_M, config.DT_S, config.T_SEGMENTS,
-                         config.YAW_OFFSET_RAD, config.MARKER_TO_BODY_X_M,
-                         config.MARKER_TO_BODY_Y_M,
-                         yaw_estimate if math.isfinite(yaw_estimate) else "",
-                         config.MODEL_GAIN_VX_POS, config.MODEL_GAIN_VX_NEG,
-                         config.MODEL_GAIN_VY_POS, config.MODEL_GAIN_VY_NEG,
-                         config.MODEL_GAIN_OMEGA_POS, config.MODEL_GAIN_OMEGA_NEG,
-                         config.VX_MAX_MPS,
-                         config.VY_MAX_MPS, config.OMEGA_MAX_RADPS,
-                         config.POSITIVE_YAW_COMMAND_SIGN,
-                         config.POSITIVE_LATERAL_COMMAND_SIGN,
-                         config.ROBOT_RADIUS_M,
-                         config.WORKSPACE_X_MIN_M, config.WORKSPACE_X_MAX_M,
-                         config.WORKSPACE_Y_MIN_M, config.WORKSPACE_Y_MAX_M,
-                         " | ".join(failures)])
-    print(f"Wrote {config.PHASE0_RESULTS_CSV}; status={'ready' if ready else 'pending'}")
+        write_candidate_csv(pilot_dir / "plan.csv", commands)
+        with (pilot_dir / "problem.json").open("x", encoding="utf-8") as target:
+            json.dump(_problem_record(name, problem), target, indent=2)
+        collect_hardware(pilot_dir / "plan.csv", pilot_dir / "raw")
+        # A run the analysis could not use (tracking gap, mocap cut short) has failed.
+        deviation = max(trace_execution(pilot_dir / "raw", config).errors)
+    except BaseException:
+        shutil.rmtree(pilot_dir, ignore_errors=True)
+        raise
+    print(f"{name} saved in {pilot_dir}. E with the current model: {deviation:.3f} m")
+    # The plot is optional: a missing matplotlib must not discard a good pilot.
+    try:
+        print(f"Trajectory plot: {plot_pilot(pilot_dir)}")
+    except Exception as error:
+        print(f"Trajectory plot skipped: {error}")
+    print(f"{number} pilot(s) so far. Run python3 phase0analyze.py when there are enough.")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    sub = parser.add_subparsers(dest="action", required=True)
-    sub.add_parser("prepare")
-    collection = sub.add_parser("collect")
-    collection.add_argument("run_id")
-    collection.add_argument("--execute", action="store_true")
-    sub.add_parser("summarize")
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--execute", action="store_true",
+                        help="run the pilot on the robot (default: preview only)")
+    parser.add_argument("--pose", type=float, nargs=3, metavar=("X", "Y", "THETA"),
+                        help="start pose for the preview (default: the Phase 1 start, facing +x)")
     args = parser.parse_args()
-    if args.action == "prepare":
-        prepare()
-    elif args.action == "collect":
-        collect(args.run_id, args.execute)
-    else:
-        summarize()
+    try:
+        collect(args.execute, tuple(args.pose) if args.pose else None)
+    except (OSError, RuntimeError, ValueError, KeyboardInterrupt) as error:
+        reason = str(error) or "Operator interrupted the run"
+        parser.exit(1, f"Failed: {reason}. Nothing was saved; the next run uses the "
+                       "same pilot number.\n")
 
 
 if __name__ == "__main__":

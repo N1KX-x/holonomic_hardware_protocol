@@ -25,7 +25,10 @@ class CoreTests(unittest.TestCase):
 
     def test_nominal_model_applies_calibrated_gains(self):
         gains = dict(MODEL_GAIN_VX_POS=0.9, MODEL_GAIN_VX_NEG=0.5, MODEL_GAIN_VY_POS=0.8,
-                     MODEL_GAIN_VY_NEG=0.4, MODEL_GAIN_OMEGA_POS=0.7, MODEL_GAIN_OMEGA_NEG=0.3)
+                     MODEL_GAIN_VY_NEG=0.4, MODEL_GAIN_OMEGA_POS=0.7, MODEL_GAIN_OMEGA_NEG=0.3,
+                     MODEL_OFFSET_VX_POS_M=0.0, MODEL_OFFSET_VY_POS_M=0.0,
+                     MODEL_OFFSET_VY_NEG_M=0.0, MODEL_OFFSET_OMEGA_POS_RAD=0.0,
+                     MODEL_OFFSET_OMEGA_NEG_RAD=0.0)
         # Each axis uses the gain for the direction of its own command.
         cases = [((0.5, 0.2, 0.4), (0.45, 0.16, 0.28)),
                  ((-0.5, -0.2, -0.4), (-0.25, -0.08, -0.12)),
@@ -36,6 +39,28 @@ class CoreTests(unittest.TestCase):
                 expected = step_holonomic(1.0, 2.0, 0.3, *scaled, 2.0)
                 for value, target in zip(got, expected):
                     self.assertAlmostEqual(value, target)
+
+    def test_nominal_model_adds_offset_per_segment_but_keeps_zero_commands_still(self):
+        model = dict(MODEL_GAIN_VX_POS=0.9, MODEL_GAIN_VX_NEG=0.5, MODEL_GAIN_VY_POS=0.8,
+                     MODEL_GAIN_VY_NEG=0.4, MODEL_GAIN_OMEGA_POS=0.7, MODEL_GAIN_OMEGA_NEG=0.3,
+                     MODEL_OFFSET_VX_POS_M=0.05, MODEL_OFFSET_VY_POS_M=0.02,
+                     MODEL_OFFSET_VY_NEG_M=-0.03, MODEL_OFFSET_OMEGA_POS_RAD=0.01,
+                     MODEL_OFFSET_OMEGA_NEG_RAD=-0.04)
+        with mock.patch.multiple(config, **model):
+            # Straight segments: motion along each axis is gain * command * dt + offset.
+            x, y, theta = nominal_step(0.0, 0.0, 0.0, Command(0, 0.5, -0.2, 0.0, 2.0), config)
+            self.assertAlmostEqual(x, 0.9*0.5*2.0 + 0.05)
+            self.assertAlmostEqual(y, 0.4*-0.2*2.0 - 0.03)
+            _, _, theta = nominal_step(0.0, 0.0, 0.0, Command(0, 0.0, 0.0, -0.4, 2.0), config)
+            self.assertAlmostEqual(theta, 0.3*-0.4*2.0 - 0.04)
+            # The offset belongs to the whole segment, so half of it applies at half time.
+            x, _, _ = nominal_step(0.0, 0.0, 0.0, Command(0, 0.5, 0.0, 0.0, 2.0), config, 1.0)
+            self.assertAlmostEqual(x, (0.9*0.5*2.0 + 0.05) / 2)
+            # A zero command moves nothing, and backward vx has a gain only.
+            self.assertEqual(nominal_step(1.0, 2.0, 0.3, Command(0, 0.0, 0.0, 0.0, 2.0), config),
+                             (1.0, 2.0, 0.3))
+            x, _, _ = nominal_step(0.0, 0.0, 0.0, Command(0, -0.5, 0.0, 0.0, 2.0), config)
+            self.assertAlmostEqual(x, 0.5*-0.5*2.0)
 
     def test_candidate_csv_round_trip(self):
         commands = [Command(k, 0.1, 0.0, 0.0, config.DT_S)
@@ -69,7 +94,10 @@ class CoreTests(unittest.TestCase):
                                      MARKER_TO_BODY_X_M=0.0, MARKER_TO_BODY_Y_M=0.0,
                                      MODEL_GAIN_VX_POS=1.0, MODEL_GAIN_VX_NEG=1.0, MODEL_GAIN_VY_POS=1.0,
                                      MODEL_GAIN_VY_NEG=1.0, MODEL_GAIN_OMEGA_POS=1.0,
-                                     MODEL_GAIN_OMEGA_NEG=1.0):
+                                     MODEL_GAIN_OMEGA_NEG=1.0,
+                                     MODEL_OFFSET_VX_POS_M=0.0, MODEL_OFFSET_VY_POS_M=0.0,
+                                     MODEL_OFFSET_VY_NEG_M=0.0, MODEL_OFFSET_OMEGA_POS_RAD=0.0,
+                                     MODEL_OFFSET_OMEGA_NEG_RAD=0.0):
                 metric = process_execution(run, "test", config)
         self.assertAlmostEqual(metric.initial_x_m, 5.0)
         self.assertAlmostEqual(metric.initial_y_m, 3.0)

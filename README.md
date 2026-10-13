@@ -3,12 +3,13 @@
 This folder implements the two-phase protocol in
 `hardware_protocol_full_holonomic.md`. It separates:
 
-- Phase 0 pipeline verification and deviation pilot (`phase0.py`)
+- Phase 0 deviation pilots (`phase0.py`) and their model fit (`phase0analyze.py`)
 - Phase 1 problem/candidate generation and collection (`main.py`)
 - offline Phase 1 deviation analysis (`analyze_phase1.py`)
 - hardware-free model/CSV code (`core.py`)
 - robot and mocap processes (`hardware/`)
 - the full-holonomic kinodynamic RRT (`planner.py`)
+- a mocap reader for measuring the map boundary (`robot_coordinate_getter.py`)
 
 No experiment has been prepared or executed.
 
@@ -28,39 +29,55 @@ No experiment has been prepared or executed.
 ```bash
 cd ~/Desktop/holonomic_hardware_protocol
 python3 -m unittest discover -s tests -v
-python3 phase0.py prepare
+python3 phase0.py
 ```
 
-`phase0.py prepare` only creates candidate CSV files and a review checklist. It
-does not connect to hardware. Every plan is checked against the per-axis and
-combined command limits before any file is written; single-axis pilots draw
-from the smaller of the axis limit and `TRANSLATIONAL_SPEED_MAX_MPS`. Do not run
-it twice in the same data folder.
+`phase0.py` without `--execute` only prints an example plan. It does not
+connect to hardware and saves nothing.
+
+## Map boundary
+
+```bash
+python3 robot_coordinate_getter.py
+```
+
+Stand the robot on each corner of the usable area and press Enter. After four
+corners it prints the `WORKSPACE_*` lines for `config.py` (the largest
+axis-aligned rectangle inside them). It only reads mocap.
 
 ## Phase 0 workflow
 
-`phase0.py prepare` creates three pipeline sequences and the configured 15-run
-pilot split. For each planned run, collection is deliberately one command at a
-time:
+Every call collects one pilot. Put the robot anywhere inside the boundary, at
+least `GOAL_RADIUS_M` from the goal, and run:
 
 ```bash
-python3 phase0.py collect pipeline_forward --execute
+python3 phase0.py --execute
 ```
 
-Collection still refuses unless `ALLOW_HARDWARE_EXECUTION = True`, and by
-default requires the operator to type the run ID. After inspecting forward,
-arc, and lateral results and independently verifying clock/yaw/lateral signs,
-change each status in `data/phase0/pipeline_review.csv` from `pending` to `pass`.
+It reads the robot's pose from mocap, draws random virtual obstacles, and
+plans an RRT path from that pose to within `GOAL_RADIUS_M` of
+(`GOAL_X_M`, `GOAL_Y_M`). The path only has to keep the body
+center inside the workspace; no margin is kept at its edge. The resulting
+velocity commands are run open-loop and saved as the next `pilot_NNN`. There is
+no fixed number of pilots. A call that fails for any reason (no path, tracking
+lost, Ctrl+C) leaves nothing behind, so the next call uses the same number.
 
-After all planned raw folders exist:
+When there are enough pilots:
 
 ```bash
-python3 phase0.py summarize
+python3 phase0analyze.py
 ```
 
-This produces `data/phase0/phase0_results.csv`. Phase 1 will only accept it when
-its status is `ready`, all pilot runs are valid, all pipeline reviews pass, and
-the estimated values satisfy `q < rho < goal radius`.
+For each of +vx, +vy, -vy, +omega and -omega the nominal model predicts
+`y = gain * x + offset`, where `x` is the motion a command asks for in one
+segment (command x dt, in the robot's frame). A seeded random search picks the
+five gains and five offsets that minimize `q` (the 90 % quantile of E over the
+pilots) and then reports every pilot's E, `q` and `rho` with them. The report
+is saved as `data/phase0/phase0_analysis.txt` and includes the lines to enter
+in `config.py`; `config.py` itself is not changed. Phase 1 accepts
+`data/phase0/phase0_results.csv` only when its status is `ready` (every saved
+pilot is valid and `q < rho < GOAL_RADIUS_M`) and `config.py` holds the fitted
+numbers.
 
 ## Phase 1 workflow
 
@@ -141,9 +158,11 @@ Step-by-step lab instructions are in `TRAINING_INSTRUCTIONS.txt`.
 ```text
 data/
   phase0/
-    plans/
-    raw/<run_id>/{commands.csv,mocap.csv,publish_log.csv}
-    pipeline_review.csv
+    pilot_001/plan.csv           planned velocity commands
+    pilot_001/problem.json       start, goal, obstacles, seeds
+    pilot_001/raw/{commands.csv,mocap.csv,publish_log.csv}
+    pilot_001/trajectory.png     planned and real trajectory
+    phase0_analysis.txt
     execution_metrics.csv
     phase0_results.csv
   phase1/
@@ -167,6 +186,7 @@ its seeded random sampling, tree expansion, parent-chain recovery, and sampled
 collision checking. The following were changed to match the protocol:
 
 - unicycle `(v, omega)` became full-holonomic `(vx, vy, omega)`;
+- `vx` is never negative: the robot only walks forward and turns to go back;
 - variable 0.2–0.5 s commands became exactly `DT_S`;
 - online lidar discovery/replanning was removed because obstacles are virtual;
 - obstacles are inflated by the frozen Phase 0 `rho`;

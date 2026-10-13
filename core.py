@@ -70,18 +70,35 @@ def step_holonomic(
     )
 
 
+def _calibrated_rate(value: float, dt: float, gain: float, offset: float) -> float:
+    """Rate whose motion over one segment is gain*(value*dt) + offset; zero stays zero."""
+    return value*gain + offset/dt if value else 0.0
+
+
 def nominal_step(x: float, y: float, theta: float, command: Command, cfg,
                  duration: float | None = None) -> tuple[float, float, float]:
-    """Nominal model: the exact holonomic step with the calibrated command gains.
+    """Nominal model: the exact holonomic step with the calibrated gains and offsets.
 
-    Each axis has one gain per direction, chosen by the sign of its command.
+    Each axis has one gain and one offset per direction, chosen by the sign of
+    its command: over a whole segment the modelled motion along that axis is
+    gain * commanded motion + offset. Backward vx has a gain only.
     """
-    vx = command.vx * (cfg.MODEL_GAIN_VX_POS if command.vx >= 0 else cfg.MODEL_GAIN_VX_NEG)
-    vy = command.vy * (cfg.MODEL_GAIN_VY_POS if command.vy >= 0 else cfg.MODEL_GAIN_VY_NEG)
-    omega = command.omega * (cfg.MODEL_GAIN_OMEGA_POS if command.omega >= 0
-                             else cfg.MODEL_GAIN_OMEGA_NEG)
-    return step_holonomic(x, y, theta, vx, vy, omega,
-                          command.dt if duration is None else duration)
+    dt = command.dt
+    if command.vx >= 0:
+        vx = _calibrated_rate(command.vx, dt, cfg.MODEL_GAIN_VX_POS, cfg.MODEL_OFFSET_VX_POS_M)
+    else:
+        vx = command.vx * cfg.MODEL_GAIN_VX_NEG
+    if command.vy >= 0:
+        vy = _calibrated_rate(command.vy, dt, cfg.MODEL_GAIN_VY_POS, cfg.MODEL_OFFSET_VY_POS_M)
+    else:
+        vy = _calibrated_rate(command.vy, dt, cfg.MODEL_GAIN_VY_NEG, cfg.MODEL_OFFSET_VY_NEG_M)
+    if command.omega >= 0:
+        omega = _calibrated_rate(command.omega, dt, cfg.MODEL_GAIN_OMEGA_POS,
+                                 cfg.MODEL_OFFSET_OMEGA_POS_RAD)
+    else:
+        omega = _calibrated_rate(command.omega, dt, cfg.MODEL_GAIN_OMEGA_NEG,
+                                 cfg.MODEL_OFFSET_OMEGA_NEG_RAD)
+    return step_holonomic(x, y, theta, vx, vy, omega, dt if duration is None else duration)
 
 
 def validate_commands(commands: Iterable[Command], cfg, require_main_horizon: bool = True) -> list[Command]:
