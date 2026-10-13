@@ -162,7 +162,7 @@ RRT_HEADING_WEIGHT = 0.10
 # to within GOAL_RADIUS_M of (GOAL_X_M, GOAL_Y_M). The plan only has to stay
 # inside the workspace (no margin at its edge).
 # Random-search steps phase0analyze.py uses to fit the gains and offsets.
-PHASE0_FIT_ITERATIONS = 20000
+PHASE0_FIT_ITERATIONS = 50000
 PILOT_HIGH_QUANTILE = 0.90
 RHO_MULTIPLIER = 1.10
 
