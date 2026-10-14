@@ -75,11 +75,10 @@ YAW_CALIBRATION_DURATION_S = 5.0
 # Workspace in mocap world coordinates (replace after mapping capture area) --
 # Largest axis-aligned rectangle inside the four measured mat corners:
 # start (2.454, -3.039), (2.231, 2.903), goal (-3.587, 2.776), (-3.362, -2.408).
-WORKSPACE_X_MIN_M = -3.362
-WORKSPACE_X_MAX_M = 2.231
-WORKSPACE_Y_MIN_M = -2.408
-WORKSPACE_Y_MAX_M = 2.776
-
+WORKSPACE_X_MIN_M = -2.826
+WORKSPACE_X_MAX_M = 1.830
+WORKSPACE_Y_MIN_M = -2.492
+WORKSPACE_Y_MAX_M = 2.358
 # Conservative planar footprint radius of the robot. Measure from the robot's
 # body/control center to its furthest occupied point and add any desired fixed
 # mechanical clearance. The planner adds the learned rho separately.
