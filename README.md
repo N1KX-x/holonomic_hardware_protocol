@@ -198,6 +198,12 @@ collision checking. The following were changed to match the protocol:
 
 - unicycle `(v, omega)` became full-holonomic `(vx, vy, omega)`;
 - `vx` is never negative: the robot only walks forward and turns to go back;
+- every segment either turns in place (`omega` only) or translates without
+  turning (`vx`, `vy` only);
+- with `PLANNER_TURN_THEN_STRAIGHT = True` (the default) plans are polylines:
+  an RRT over positions finds waypoints, the path is shortcut to few corners,
+  and the robot turns in place to face each corner and walks straight to it
+  (`vx` and `omega` only), at a random speed per leg;
 - variable 0.2–0.5 s commands became exactly `DT_S`;
 - online lidar discovery/replanning was removed because obstacles are virtual;
 - obstacles are inflated by the frozen Phase 0 `rho`;

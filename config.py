@@ -137,6 +137,12 @@ OBSTACLE_COUNT_MAX = 5
 OBSTACLE_RADIUS_MIN_M = 0.10
 OBSTACLE_RADIUS_MAX_M = 0.30
 RRT_MAX_ITERATIONS = 10000
+# True: plans are polylines. An RRT over positions finds waypoints (edges of
+# up to RRT_STEP_M, then shortcut), and the robot turns in place to face each
+# waypoint and walks straight to it (vx and omega only, never together).
+# False: the kinodynamic RRT that samples (vx, vy, omega) every segment.
+PLANNER_TURN_THEN_STRAIGHT = True
+RRT_STEP_M = 0.5
 RRT_GOAL_SAMPLE_RATE = 0.30
 RRT_CONTROL_SAMPLES_PER_EXPANSION = 30
 RRT_COLLISION_SAMPLE_SPACING_M = 0.025
@@ -182,7 +188,6 @@ def validate() -> None:
         "DT_S": DT_S,
         "T_SEGMENTS": T_SEGMENTS,
         "VX_MAX_MPS": VX_MAX_MPS,
-        "VY_MAX_MPS": VY_MAX_MPS,
         "OMEGA_MAX_RADPS": OMEGA_MAX_RADPS,
         "ROBOT_RADIUS_M": ROBOT_RADIUS_M,
         "GOAL_RADIUS_M": GOAL_RADIUS_M,
@@ -208,6 +213,10 @@ def validate() -> None:
         raise ValueError("The goal must be inside the workspace")
     if not isinstance(PHASE0_FIT_ITERATIONS, int) or PHASE0_FIT_ITERATIONS < 1:
         raise ValueError("PHASE0_FIT_ITERATIONS must be a positive integer")
+    # 0 turns sideways motion off: plans then only walk forward and turn in place.
+    if not (isinstance(VY_MAX_MPS, (int, float)) and math.isfinite(VY_MAX_MPS)
+            and VY_MAX_MPS >= 0):
+        raise ValueError("VY_MAX_MPS must be finite and zero or positive")
     reset_positive = {
         "RESET_POSITION_TOLERANCE_M": RESET_POSITION_TOLERANCE_M,
         "RESET_HEADING_TOLERANCE_RAD": RESET_HEADING_TOLERANCE_RAD,
@@ -220,10 +229,12 @@ def validate() -> None:
     for name, value in reset_positive.items():
         if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
             raise ValueError(f"{name} must be finite and positive")
-    if RESET_VX_MAX_MPS > VX_MAX_MPS or RESET_VY_MAX_MPS > VY_MAX_MPS:
-        raise ValueError("Reset translation limits cannot exceed experiment limits")
-    if RESET_OMEGA_MAX_RADPS > OMEGA_MAX_RADPS:
-        raise ValueError("Reset yaw limit cannot exceed experiment limit")
+    # The reset limits only matter when the autonomous reset can run.
+    if AUTONOMOUS_RESET_ENABLED:
+        if RESET_VX_MAX_MPS > VX_MAX_MPS or RESET_VY_MAX_MPS > VY_MAX_MPS:
+            raise ValueError("Reset translation limits cannot exceed experiment limits")
+        if RESET_OMEGA_MAX_RADPS > OMEGA_MAX_RADPS:
+            raise ValueError("Reset yaw limit cannot exceed experiment limit")
     if EDGE_STOP_MARGIN_M is not None and not (
             isinstance(EDGE_STOP_MARGIN_M, (int, float)) and EDGE_STOP_MARGIN_M >= 0):
         raise ValueError("EDGE_STOP_MARGIN_M must be None or a non-negative number")

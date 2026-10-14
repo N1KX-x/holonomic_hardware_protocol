@@ -170,14 +170,17 @@ def _sample_control(rng: random.Random) -> tuple[float, float, float]:
         choices = [value for value in (-limit, -0.5*limit, 0.0, 0.5*limit, limit)
                    if value >= lowest]
         return rng.choice(choices) if rng.random() < 0.65 else rng.uniform(lowest, limit)
+    # Each segment either turns in place (omega only) or translates without
+    # turning (vx, vy only), never both.
+    if rng.random() < 0.5:
+        return 0.0, 0.0, component(config.OMEGA_MAX_RADPS, -config.OMEGA_MAX_RADPS)
     for _ in range(100):
         # vx is never negative: the robot only walks forward and turns to go back.
         vx = component(config.VX_MAX_MPS, 0.0)
         vy = component(config.VY_MAX_MPS, -config.VY_MAX_MPS)
-        omega = component(config.OMEGA_MAX_RADPS, -config.OMEGA_MAX_RADPS)
         limit = config.TRANSLATIONAL_SPEED_MAX_MPS
         if limit is None or math.hypot(vx, vy) <= limit:
-            return vx, vy, omega
+            return vx, vy, 0.0
     return 0.0, 0.0, 0.0
 
 
@@ -200,12 +203,139 @@ def plan_candidate(problem: Problem, seed: int, rho: float) -> list[Command] | N
     if not 0.0 < rho < config.GOAL_RADIUS_M:
         raise ValueError("rho must satisfy 0 < rho < GOAL_RADIUS_M")
     clearance = config.ROBOT_RADIUS_M + rho
-    return _plan(problem, seed, config.GOAL_RADIUS_M - rho, clearance, clearance)
+    planner = _plan_turn_then_straight if config.PLANNER_TURN_THEN_STRAIGHT else _plan
+    return planner(problem, seed, config.GOAL_RADIUS_M - rho, clearance, clearance)
 
 
 def plan_pilot(problem: Problem, seed: int) -> list[Command] | None:
     """Phase 0 plan, or None: no rho yet, and the body center may reach the workspace edge."""
-    return _plan(problem, seed, config.GOAL_RADIUS_M, config.ROBOT_RADIUS_M, 0.0)
+    planner = _plan_turn_then_straight if config.PLANNER_TURN_THEN_STRAIGHT else _plan
+    return planner(problem, seed, config.GOAL_RADIUS_M, config.ROBOT_RADIUS_M, 0.0)
+
+
+def _line_is_free(a, b, obstacles, clearance: float, edge_clearance: float) -> bool:
+    samples = max(1, math.ceil(math.dist(a, b) / config.RRT_COLLISION_SAMPLE_SPACING_M))
+    return all(_point_is_free(a[0] + (b[0]-a[0])*i/samples, a[1] + (b[1]-a[1])*i/samples,
+                              obstacles, clearance, edge_clearance)
+               for i in range(samples + 1))
+
+
+def _waypoints(problem: Problem, rng: random.Random, goal_radius: float,
+               clearance: float, edge_clearance: float) -> list[tuple[float, float]] | None:
+    """RRT over positions from the start to the goal region, shortcut to few corners."""
+    def free(a, b):
+        return _line_is_free(a, b, problem.obstacles, clearance, edge_clearance)
+    start, goal = (problem.start_x, problem.start_y), (problem.goal_x, problem.goal_y)
+    points, parents = [start], [None]
+    for _ in range(config.RRT_MAX_ITERATIONS):
+        target = (goal if rng.random() < config.RRT_GOAL_SAMPLE_RATE else
+                  (rng.uniform(config.WORKSPACE_X_MIN_M, config.WORKSPACE_X_MAX_M),
+                   rng.uniform(config.WORKSPACE_Y_MIN_M, config.WORKSPACE_Y_MAX_M)))
+        nearest = min(range(len(points)), key=lambda i: math.dist(points[i], target))
+        distance = math.dist(points[nearest], target)
+        if distance < 1e-9:
+            continue
+        fraction = min(1.0, config.RRT_STEP_M / distance)
+        new = (points[nearest][0] + (target[0]-points[nearest][0])*fraction,
+               points[nearest][1] + (target[1]-points[nearest][1])*fraction)
+        if not free(points[nearest], new):
+            continue
+        points.append(new)
+        parents.append(nearest)
+        if math.dist(new, goal) <= goal_radius:
+            path, index = [], len(points) - 1
+            while index is not None:
+                path.append(points[index])
+                index = parents[index]
+            path.reverse()
+            # Walk on to the goal center when nothing is in the way.
+            if free(path[-1], goal):
+                path.append(goal)
+            corners, current = [path[0]], 0
+            while current < len(path) - 1:
+                current = next(j for j in range(len(path) - 1, current, -1)
+                               if free(path[current], path[j]))
+                corners.append(path[current])
+            return corners
+    return None
+
+
+def _equal_steps(amount: float, rate_limit: float, fraction: float,
+                 gain: float, offset: float, dt: float) -> tuple[int, float] | None:
+    """(segments, command) whose modelled motion covers `amount` > 0 in equal segments.
+
+    The model moves gain*command*dt + offset per segment, so the command is
+    solved from it; the commanded rate stays within (0, rate_limit].
+    """
+    per_segment = gain*fraction*rate_limit*dt + offset
+    first = max(1, math.ceil(amount / per_segment)) if per_segment > 0 else 1
+    for count in range(first, first + 100):
+        rate = (amount/count - offset) / (gain*dt)
+        if 0.0 < rate <= rate_limit:
+            return count, rate
+    return None
+
+
+def _commands_along(corners, start_theta: float, rng: random.Random,
+                    full_speed: bool) -> list[Command] | None:
+    """Turn in place to face each corner, then walk straight to it."""
+    cfg, dt = config, config.DT_S
+    state = (*corners[0], start_theta)
+    commands: list[Command] = []
+    for corner in corners[1:]:
+        turn = wrap_angle(math.atan2(corner[1]-state[1], corner[0]-state[0]) - state[2])
+        legs = []
+        if abs(turn) > 1e-6:
+            if turn > 0:
+                gain, offset, sign = cfg.MODEL_GAIN_OMEGA_POS, cfg.MODEL_OFFSET_OMEGA_POS_RAD, 1.0
+            else:
+                gain, offset, sign = cfg.MODEL_GAIN_OMEGA_NEG, -cfg.MODEL_OFFSET_OMEGA_NEG_RAD, -1.0
+            fraction = 1.0 if full_speed else rng.uniform(0.5, 1.0)
+            legs.append(("omega", sign, _equal_steps(abs(turn), cfg.OMEGA_MAX_RADPS, fraction,
+                                                     gain, offset, dt)))
+        distance = math.dist(state[:2], corner)
+        if distance > 1e-6:
+            fraction = 1.0 if full_speed else rng.uniform(0.5, 1.0)
+            legs.append(("vx", 1.0, _equal_steps(distance, cfg.VX_MAX_MPS, fraction,
+                                                 cfg.MODEL_GAIN_VX_POS,
+                                                 cfg.MODEL_OFFSET_VX_POS_M, dt)))
+        for axis, sign, steps in legs:
+            if steps is None:
+                return None
+            count, rate = steps
+            for _ in range(count):
+                command = Command(len(commands), sign*rate if axis == "vx" else 0.0, 0.0,
+                                  sign*rate if axis == "omega" else 0.0, dt)
+                commands.append(command)
+                state = nominal_step(*state, command, cfg)
+    return commands
+
+
+def _plan_turn_then_straight(problem: Problem, seed: int, goal_radius: float,
+                             clearance: float, edge_clearance: float) -> list[Command] | None:
+    """Polyline plan: turn in place, walk straight, repeat; None if it does not fit."""
+    rng = random.Random(seed)
+    corners = _waypoints(problem, rng, goal_radius, clearance, edge_clearance)
+    if corners is None:
+        return None
+    # Random speeds per leg vary the data; full speed is the fallback for long paths.
+    for full_speed in (False, True):
+        commands = _commands_along(corners, problem.start_theta, rng, full_speed)
+        if commands is not None and len(commands) <= config.T_SEGMENTS:
+            break
+    else:
+        return None
+    state = (problem.start_x, problem.start_y, problem.start_theta)
+    for command in commands:
+        if not _command_is_free(state, command.vx, command.vy, command.omega,
+                                problem.obstacles, clearance, edge_clearance):
+            return None
+        state = nominal_step(*state, command, config)
+    if math.hypot(state[0]-problem.goal_x, state[1]-problem.goal_y) > goal_radius:
+        return None
+    while len(commands) < config.T_SEGMENTS:
+        commands.append(Command(len(commands), 0.0, 0.0, 0.0, config.DT_S))
+    return commands
 
 
 def _plan(problem: Problem, seed: int, goal_radius: float,
