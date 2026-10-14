@@ -29,6 +29,7 @@ RESET_ROOT = config.PHASE1_ROOT / "resets"
 
 
 def load_phase0() -> float:
+    config.validate_phase1_course()
     if not config.PHASE0_RESULTS_CSV.is_file():
         raise FileNotFoundError(
             f"Run phase0analyze.py first; missing {config.PHASE0_RESULTS_CSV}"

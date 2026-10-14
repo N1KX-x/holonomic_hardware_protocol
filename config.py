@@ -253,11 +253,19 @@ def validate() -> None:
             and 2 * TRAINING_PLAN_MARGIN_M < min(WORKSPACE_X_MAX_M - WORKSPACE_X_MIN_M,
                                                  WORKSPACE_Y_MAX_M - WORKSPACE_Y_MIN_M)):
         raise ValueError("TRAINING_PLAN_MARGIN_M must leave room inside the workspace")
-    if START_X_M is not None:
-        # Any viable rho is below GOAL_RADIUS_M, so this clearance always suffices.
-        clearance = ROBOT_RADIUS_M + GOAL_RADIUS_M
-        for name, x, y in (("start", START_X_M, START_Y_M), ("goal", GOAL_X_M, GOAL_Y_M)):
-            if not (WORKSPACE_X_MIN_M + clearance <= x <= WORKSPACE_X_MAX_M - clearance
-                    and WORKSPACE_Y_MIN_M + clearance <= y <= WORKSPACE_Y_MAX_M - clearance):
-                raise ValueError(f"Fixed {name} must be at least {clearance:.2f} m "
-                                 "inside the workspace")
+
+
+def validate_phase1_course() -> None:
+    """Phase 1 only: the fixed start and goal must leave room for any viable rho.
+
+    Other programs (Phase 0, yaw calibration, training) do not use them.
+    """
+    if START_X_M is None:
+        return
+    # Any viable rho is below GOAL_RADIUS_M, so this clearance always suffices.
+    clearance = ROBOT_RADIUS_M + GOAL_RADIUS_M
+    for name, x, y in (("start", START_X_M, START_Y_M), ("goal", GOAL_X_M, GOAL_Y_M)):
+        if not (WORKSPACE_X_MIN_M + clearance <= x <= WORKSPACE_X_MAX_M - clearance
+                and WORKSPACE_Y_MIN_M + clearance <= y <= WORKSPACE_Y_MAX_M - clearance):
+            raise ValueError(f"Phase 1 fixed {name} (START_X_M/GOAL_X_M ...) must be at "
+                             f"least {clearance:.2f} m inside the workspace")
