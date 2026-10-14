@@ -87,26 +87,24 @@ ROBOT_RADIUS_M = 0.30
 
 
 DT_S = 1.0
-T_SEGMENTS = 20
+T_SEGMENTS = 25
 VX_MAX_MPS = 0.5
 VY_MAX_MPS = 0.5
-OMEGA_MAX_RADPS = 0.4
+OMEGA_MAX_RADPS = 0.5
 # Optional combined translational limit. Set None if the interface has none.
 TRANSLATIONAL_SPEED_MAX_MPS = None
 
-MODEL_GAIN_VX_POS = 1.05     # forward
-MODEL_GAIN_VX_NEG = 1.00    # backward
-MODEL_GAIN_VY_POS = 1.00     # sideways to the robot's left
-MODEL_GAIN_VY_NEG = 0.74     # sideways to the robot's right
-MODEL_GAIN_OMEGA_POS = 0.82  # turning left (counterclockwise)
-MODEL_GAIN_OMEGA_NEG = 0.79  # turning right (clockwise)
-# Offsets of the same model, per command segment: modelled motion = gain *
-# commanded motion + offset, in the robot's frame (m, or rad for omega). 
-MODEL_OFFSET_VX_POS_M = 0.0
+MODEL_GAIN_VX_POS = 1.0482
+MODEL_OFFSET_VX_POS_M = 0.0002
+MODEL_GAIN_VY_POS = 1.0
 MODEL_OFFSET_VY_POS_M = 0.0
+MODEL_GAIN_VY_NEG = 0.74
 MODEL_OFFSET_VY_NEG_M = 0.0
-MODEL_OFFSET_OMEGA_POS_RAD = 0.0
-MODEL_OFFSET_OMEGA_NEG_RAD = 0.0
+MODEL_GAIN_OMEGA_POS = 0.7714
+MODEL_OFFSET_OMEGA_POS_RAD = 0.0207
+MODEL_GAIN_OMEGA_NEG = 0.9233
+MODEL_OFFSET_OMEGA_NEG_RAD = 0.1514
+
 
 
 # Planning ------------------------------------------------------------------
@@ -132,10 +130,10 @@ MASTER_RANDOM_SEED = 20261009
 # Uploaded planner entry point. Expected callable contract is documented in
 # planner_adapter.py. Example: "my_rrt:create_candidates".
 PLANNER_ENTRY_POINT = ""
-OBSTACLE_COUNT_MIN = 2
-OBSTACLE_COUNT_MAX = 5
-OBSTACLE_RADIUS_MIN_M = 0.10
-OBSTACLE_RADIUS_MAX_M = 0.30
+OBSTACLE_COUNT_MIN = 4
+OBSTACLE_COUNT_MAX = 6
+OBSTACLE_RADIUS_MIN_M = 0.20
+OBSTACLE_RADIUS_MAX_M = 0.40
 RRT_MAX_ITERATIONS = 10000
 # True: plans are polylines. An RRT over positions finds waypoints (edges of
 # up to RRT_STEP_M, then shortcut), and the robot turns in place to face each
