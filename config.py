@@ -86,10 +86,10 @@ ROBOT_RADIUS_M = 0.30
 
 
 
-DT_S = 0.2
-T_SEGMENTS = 80
+DT_S = 1.0
+T_SEGMENTS = 20
 VX_MAX_MPS = 0.5
-VY_MAX_MPS = 0
+VY_MAX_MPS = 0.5
 OMEGA_MAX_RADPS = 0.4
 # Optional combined translational limit. Set None if the interface has none.
 TRANSLATIONAL_SPEED_MAX_MPS = None
