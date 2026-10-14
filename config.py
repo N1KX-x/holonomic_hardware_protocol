@@ -60,7 +60,7 @@ MOCAP_GROUND_Y_SIGN = -1.0
 
 
 # Measured calibration
-YAW_OFFSET_RAD = 2.40395144164075
+YAW_OFFSET_RAD = 2.4086
 MARKER_TO_BODY_X_M = -0.07
 MARKER_TO_BODY_Y_M = -0.01
 POSITIVE_YAW_COMMAND_SIGN = 1.0
@@ -86,10 +86,10 @@ ROBOT_RADIUS_M = 0.30
 
 
 
-DT_S = 0.5
-T_SEGMENTS = 40
-VX_MAX_MPS = 1.0
-VY_MAX_MPS = 1.0
+DT_S = 0.2
+T_SEGMENTS = 80
+VX_MAX_MPS = 0.5
+VY_MAX_MPS = 0
 OMEGA_MAX_RADPS = 0.4
 # Optional combined translational limit. Set None if the interface has none.
 TRANSLATIONAL_SPEED_MAX_MPS = None
@@ -119,8 +119,8 @@ START_REGION_RADIUS_M = 0.50
 # and GOAL_RADIUS_M, but start wherever the robot stands.
 START_X_M = 0.881
 START_Y_M = -1.058
-GOAL_X_M = -2.012
-GOAL_Y_M = 1.426
+GOAL_X_M = -2.364
+GOAL_Y_M = 2.067
 # None makes the robot start facing the goal.
 START_THETA_RAD = None
 # PHASE0_RESULTS_CSV supplies the frozen rho used by main.py. This fallback is
