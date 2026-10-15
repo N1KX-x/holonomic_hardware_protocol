@@ -16,7 +16,7 @@ import shutil
 from pathlib import Path
 
 import config
-from core import Command, nominal_step, trace_execution, validate_commands, write_candidate_csv
+from core import Command, nominal_rollout, trace_execution, validate_commands, write_candidate_csv
 from planner import Problem, plan_pilot, sample_pilot_problem
 
 
@@ -110,9 +110,8 @@ def _print_plan(name: str, problem: Problem, commands: list[Command]) -> None:
     print("    k      vx      vy   omega")
     for command in moving:
         print(f"  {command.k:3d}  {command.vx:+.3f}  {command.vy:+.3f}  {command.omega:+.3f}")
-    end = (problem.start_x, problem.start_y, problem.start_theta)
-    for command in commands:
-        end = nominal_step(*end, command, config)
+    end = nominal_rollout(commands, (problem.start_x, problem.start_y, problem.start_theta),
+                          config)[-1]
     print(f"  nominal end: x={end[0]:.2f} m, y={end[1]:.2f} m")
 
 

@@ -33,13 +33,15 @@ def _dense_path(commands, start):
     points = [start[:2]]
     boundaries = [start[:2]]
     state = start
+    previous = None
     for command in commands:
         for index in range(1, SAMPLES_PER_SEGMENT + 1):
             x, y, _ = nominal_step(*state, command, config,
-                                   command.dt*index/SAMPLES_PER_SEGMENT)
+                                   command.dt*index/SAMPLES_PER_SEGMENT, previous)
             points.append((x, y))
-        state = nominal_step(*state, command, config)
+        state = nominal_step(*state, command, config, previous=previous)
         boundaries.append(state[:2])
+        previous = command
     return points, boundaries
 
 

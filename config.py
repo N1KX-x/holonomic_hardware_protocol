@@ -94,16 +94,28 @@ OMEGA_MAX_RADPS = 0.5
 # Optional combined translational limit. Set None if the interface has none.
 TRANSLATIONAL_SPEED_MAX_MPS = None
 
-MODEL_GAIN_VX_POS = 1.0482
-MODEL_OFFSET_VX_POS_M = 0.0002
-MODEL_GAIN_VY_POS = 1.0
+# Nominal model (core.nominal_step). Per command segment, the modelled motion
+# along each axis is gain * commanded motion + offset (m, or rad for omega).
+# Values measured on the 2026-10-14 turn-then-walk pilots.
+MODEL_GAIN_VX_POS = 1.05     # forward
+MODEL_OFFSET_VX_POS_M = 0.0
+# Backward and sideways motion are not used: gain 0 models no motion.
+MODEL_GAIN_VX_NEG = 0.0      # backward
+MODEL_GAIN_VY_POS = 0.0      # sideways to the robot's left
 MODEL_OFFSET_VY_POS_M = 0.0
-MODEL_GAIN_VY_NEG = 0.74
+MODEL_GAIN_VY_NEG = 0.0      # sideways to the robot's right
 MODEL_OFFSET_VY_NEG_M = 0.0
-MODEL_GAIN_OMEGA_POS = 0.7714
-MODEL_OFFSET_OMEGA_POS_RAD = 0.0207
-MODEL_GAIN_OMEGA_NEG = 0.9233
-MODEL_OFFSET_OMEGA_NEG_RAD = 0.1514
+MODEL_GAIN_OMEGA_POS = 0.70  # turning left (counterclockwise)
+MODEL_OFFSET_OMEGA_POS_RAD = 0.0
+MODEL_GAIN_OMEGA_NEG = 0.70  # turning right (clockwise)
+MODEL_OFFSET_OMEGA_NEG_RAD = 0.0
+# An in-place turn begins this late from standstill, and this late right
+# after walking (the gait is already running).
+MODEL_TURN_LAG_S = 0.30
+MODEL_TURN_LAG_AFTER_WALK_S = 0.10
+# Walking forward yaws the robot left by this much per metre of commanded
+# forward motion (about 2.9 deg/m).
+MODEL_WALK_YAW_RAD_PER_M = 0.05
 
 
 
@@ -236,16 +248,25 @@ def validate() -> None:
     if EDGE_STOP_MARGIN_M is not None and not (
             isinstance(EDGE_STOP_MARGIN_M, (int, float)) and EDGE_STOP_MARGIN_M >= 0):
         raise ValueError("EDGE_STOP_MARGIN_M must be None or a non-negative number")
-    for name in ("MODEL_GAIN_VX_POS", "MODEL_GAIN_VX_NEG", "MODEL_GAIN_VY_POS",
-                 "MODEL_GAIN_VY_NEG", "MODEL_GAIN_OMEGA_POS", "MODEL_GAIN_OMEGA_NEG"):
+    for name in ("MODEL_GAIN_VX_POS", "MODEL_GAIN_OMEGA_POS", "MODEL_GAIN_OMEGA_NEG"):
         value = globals()[name]
         if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
             raise ValueError(f"{name} must be finite and positive")
+    # 0 marks a direction the model does not use.
+    for name in ("MODEL_GAIN_VX_NEG", "MODEL_GAIN_VY_POS", "MODEL_GAIN_VY_NEG"):
+        value = globals()[name]
+        if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+            raise ValueError(f"{name} must be finite and zero or positive")
     for name in ("MODEL_OFFSET_VX_POS_M", "MODEL_OFFSET_VY_POS_M", "MODEL_OFFSET_VY_NEG_M",
-                 "MODEL_OFFSET_OMEGA_POS_RAD", "MODEL_OFFSET_OMEGA_NEG_RAD"):
+                 "MODEL_OFFSET_OMEGA_POS_RAD", "MODEL_OFFSET_OMEGA_NEG_RAD",
+                 "MODEL_WALK_YAW_RAD_PER_M"):
         value = globals()[name]
         if not isinstance(value, (int, float)) or not math.isfinite(value):
             raise ValueError(f"{name} must be finite")
+    for name in ("MODEL_TURN_LAG_S", "MODEL_TURN_LAG_AFTER_WALK_S"):
+        value = globals()[name]
+        if not (isinstance(value, (int, float)) and 0 <= value < DT_S):
+            raise ValueError(f"{name} must be at least zero and shorter than DT_S")
     safety_positive = {
         "LIVE_TRACKING_TIMEOUT_S": LIVE_TRACKING_TIMEOUT_S,
         "START_POSITION_TOLERANCE_M": START_POSITION_TOLERANCE_M,

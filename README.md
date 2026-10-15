@@ -81,9 +81,14 @@ python3 phase0analyze.py
 
 For each of +vx, +vy, -vy, +omega and -omega the nominal model predicts
 `y = gain * x + offset`, where `x` is the motion a command asks for in one
-segment (command x dt, in the robot's frame). A seeded random search picks the
-five gains and five offsets that minimize `q` (the 90 % quantile of E over the
-pilots) and then reports every pilot's E, `q` and `rho` with them. The report
+segment (command x dt, in the robot's frame). Two more terms come from the
+Go2's turn-then-walk behaviour: an in-place turn that starts a turn begins
+`MODEL_TURN_LAG_S` late from standstill and `MODEL_TURN_LAG_AFTER_WALK_S` late
+right after walking, and walking forward yaws the robot left by
+`MODEL_WALK_YAW_RAD_PER_M` per commanded metre. A seeded random search picks
+the five gains, five offsets and these three terms that minimize `q` (the 90 %
+quantile of E over the pilots) and then reports every pilot's E, `q` and `rho`
+with them. The report
 is saved as `data/phase0/phase0_analysis.txt` and includes the lines to enter
 in `config.py`; `config.py` itself is not changed. Phase 1 accepts
 `data/phase0/phase0_results.csv` only when its status is `ready` (every saved

@@ -60,13 +60,17 @@ def load_phase0() -> float:
         "model_offset_vy_neg_m": config.MODEL_OFFSET_VY_NEG_M,
         "model_offset_omega_pos_rad": config.MODEL_OFFSET_OMEGA_POS_RAD,
         "model_offset_omega_neg_rad": config.MODEL_OFFSET_OMEGA_NEG_RAD,
+        "model_turn_lag_s": config.MODEL_TURN_LAG_S,
+        "model_turn_lag_after_walk_s": config.MODEL_TURN_LAG_AFTER_WALK_S,
+        "model_walk_yaw_rad_per_m": config.MODEL_WALK_YAW_RAD_PER_M,
         "robot_radius_m": config.ROBOT_RADIUS_M,
         "workspace_x_min_m": config.WORKSPACE_X_MIN_M,
         "workspace_x_max_m": config.WORKSPACE_X_MAX_M,
         "workspace_y_min_m": config.WORKSPACE_Y_MIN_M,
         "workspace_y_max_m": config.WORKSPACE_Y_MAX_M,
     }
-    changed = [name for name, value in frozen.items() if float(row[name]) != value]
+    changed = [name for name, value in frozen.items()
+               if name not in row or float(row[name]) != value]
     if changed:
         raise RuntimeError(f"Configuration changed after Phase 0: {', '.join(changed)}")
     calibration = (float(row["yaw_offset_rad"]), float(row["marker_to_body_x_m"]),

@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Go2 Velocity Model</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<style>
+  :root { --text: #1a1a1a; --muted: #555; --bg: #fff; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --text: #e6e6e6; --muted: #aaa; --bg: #1c1c1c; }
+  }
+  :root[data-theme="dark"] { --text: #e6e6e6; --muted: #aaa; --bg: #1c1c1c; }
+  body { background: var(--bg); color: var(--text); font-family: "Latin Modern Roman", "Computer Modern Serif", Georgia, "Times New Roman", serif;
+         font-size: 17px; line-height: 1.55; max-width: 760px; margin: 0 auto; padding: 40px 16px 80px; }
+  h1 { font-size: 26px; font-weight: normal; text-align: center; margin: 0 0 6px; }
+  .date { text-align: center; color: var(--muted); margin-bottom: 36px; }
+  h2 { font-size: 21px; margin: 34px 0 10px; }
+  p { margin: 8px 0; text-align: justify; hyphens: auto; }
+  .katex-display { overflow-x: auto; overflow-y: hidden; padding: 4px 0; }
+  table { border-collapse: collapse; margin: 18px auto 6px; }
+  th, td { padding: 4px 14px; text-align: left; }
+  thead tr { border-top: 2px solid var(--text); border-bottom: 1px solid var(--text); }
+  tbody tr:last-child { border-bottom: 2px solid var(--text); }
+  .caption { text-align: center; color: var(--muted); font-size: 15px; }
+</style>
+</head>
+<body>
+<h1>Nominal Velocity Model of the Unitree Go2</h1>
+<div class="date">October 2026</div>
+
+<h2>1&nbsp;&nbsp;General Model</h2>
+<p>Each command segment \(k\) holds a forward speed \(v_x \ge 0\) and a yaw rate \(\omega\) for a duration \(T\). The yaw command is split into its left and right parts, \(\omega^{+} = \max(\omega, 0)\) and \(\omega^{-} = \min(\omega, 0)\). The body-frame velocity the robot achieves is modelled as</p>
+$$\begin{bmatrix} \tilde v_x \\ \tilde\omega^{+} \\ \tilde\omega^{-} \end{bmatrix}
+= \underbrace{\begin{bmatrix} g_x & 0 & 0 \\ 0 & g_\omega^{+} & 0 \\ 0 & 0 & g_\omega^{-} \end{bmatrix}}_{\mathbf{G}_3}
+\begin{bmatrix} v_x \\ \omega^{+} \\ \omega^{-} \end{bmatrix}
++ \frac{1}{T}\begin{bmatrix} o_x\,\mathbf{1}(v_x>0) \\ o_\omega^{+}\,\mathbf{1}(\omega>0) \\ o_\omega^{-}\,\mathbf{1}(\omega<0) \end{bmatrix}
++ \begin{bmatrix} 0 \\ \kappa\, v_x \\ 0 \end{bmatrix}, \tag{1}$$
+<p>and the yaw rate of the robot is \(\tilde\omega = \tilde\omega^{+} + \tilde\omega^{-}\). Here \(g_x\) and \(o_x\) are the forward gain and offset, \(g_\omega^{\pm}\) and \(o_\omega^{\pm}\) the left (\(+\)) and right (\(-\)) turn gains and offsets, \(\mathbf{1}(\cdot)\) equals 1 when its condition holds and 0 otherwise, and \(\kappa\) is the yaw drift per metre of commanded forward walking.</p>
+
+<h2>2&nbsp;&nbsp;Turning from Standstill and after Running</h2>
+<p>The robot needs time to begin a turn, and this time depends on whether its gait is already running. We therefore distinguish the case \(c_k\) of every in-place turn segment (\(v_x = 0,\ \omega \neq 0\)):</p>
+$$c_k = \begin{cases}
+\mathrm{st} & \text{first segment of a turn, robot at standstill } (k = 0 \text{ or } \mathbf{u}_{k-1} = \mathbf{0}),\\
+\mathrm{run} & \text{first segment of a turn, right after running } (\mathbf{u}_{k-1} \neq \mathbf{0}),\\
+\mathrm{cont} & \text{later segment of the same turn}.
+\end{cases} \tag{2}$$
+<p>The turn gains and offsets in (1) take the values of that case:</p>
+$$g_\omega^{\pm} = g_{\omega,c_k}^{\pm}, \qquad o_\omega^{\pm} = o_{\omega,c_k}^{\pm}, \qquad c_k \in \{\mathrm{st}, \mathrm{run}, \mathrm{cont}\}. \tag{3}$$
+<p>A turn that starts from standstill loses about \(\lambda_{\mathrm{st}} = 0.30\) s of its first segment and one that starts right after running about \(\lambda_{\mathrm{run}} = 0.10\) s. Losing this time at the steady turn rate is equivalent to a smaller gain in the first segment,</p>
+$$g_{\omega,c}^{\pm} = g_{\omega,\mathrm{cont}}^{\pm}\left(1 - \frac{\lambda_c}{T}\right), \qquad c \in \{\mathrm{st}, \mathrm{run}\}. \tag{4}$$
+
+<h2>3&nbsp;&nbsp;Parameter Values</h2>
+<table>
+  <thead><tr><th>Variable</th><th>Value</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td>\(g_x\)</td><td>1.05</td><td>forward gain</td></tr>
+    <tr><td>\(o_x\)</td><td>0 m</td><td>forward offset per segment</td></tr>
+    <tr><td>\(\kappa\)</td><td>0.05 rad/m</td><td>walking yaw drift</td></tr>
+    <tr><td>\(g_{\omega,\mathrm{st}}^{+},\ g_{\omega,\mathrm{st}}^{-}\)</td><td>0.49, 0.49</td><td>turn gains, first segment from standstill</td></tr>
+    <tr><td>\(o_{\omega,\mathrm{st}}^{+},\ o_{\omega,\mathrm{st}}^{-}\)</td><td>0 rad, 0 rad</td><td>turn offsets, first segment from standstill</td></tr>
+    <tr><td>\(g_{\omega,\mathrm{run}}^{+},\ g_{\omega,\mathrm{run}}^{-}\)</td><td>0.63, 0.63</td><td>turn gains, first segment after running</td></tr>
+    <tr><td>\(o_{\omega,\mathrm{run}}^{+},\ o_{\omega,\mathrm{run}}^{-}\)</td><td>0 rad, 0 rad</td><td>turn offsets, first segment after running</td></tr>
+    <tr><td>\(g_{\omega,\mathrm{cont}}^{+},\ g_{\omega,\mathrm{cont}}^{-}\)</td><td>0.70, 0.70</td><td>turn gains, later segments of a turn</td></tr>
+    <tr><td>\(o_{\omega,\mathrm{cont}}^{+},\ o_{\omega,\mathrm{cont}}^{-}\)</td><td>0 rad, 0 rad</td><td>turn offsets, later segments of a turn</td></tr>
+    <tr><td>\(T\)</td><td>1 s</td><td>segment duration</td></tr>
+  </tbody>
+</table>
+<div class="caption">Table 1: Model parameters identified from 30 pilot runs recorded on 2026-10-14.</div>
+
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+<script>
+  renderMathInElement(document.body, {
+    delimiters: [{left: "$$", right: "$$", display: true}, {left: "\\(", right: "\\)", display: false}],
+    throwOnError: false
+  });
+</script>
+</body>
+</html>

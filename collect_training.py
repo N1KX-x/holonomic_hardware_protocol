@@ -26,7 +26,7 @@ from datetime import datetime
 from pathlib import Path
 
 import config
-from core import Command, nominal_step, process_execution, validate_commands, write_candidate_csv
+from core import Command, nominal_rollout, nominal_step, process_execution, validate_commands, write_candidate_csv
 
 
 PLAN_DIR = config.TRAINING_ROOT / "plans"
@@ -96,9 +96,10 @@ def _inside(x: float, y: float) -> bool:
             and config.WORKSPACE_Y_MIN_M + margin <= y <= config.WORKSPACE_Y_MAX_M - margin)
 
 
-def _segment_stays_inside(pose, command: Command) -> bool:
+def _segment_stays_inside(pose, command: Command, previous: Command | None) -> bool:
     steps = max(1, math.ceil(command.dt / PATH_CHECK_STEP_S))
-    return all(_inside(*nominal_step(*pose, command, config, duration=command.dt * i / steps)[:2])
+    return all(_inside(*nominal_step(*pose, command, config, duration=command.dt * i / steps,
+                                     previous=previous)[:2])
                for i in range(1, steps + 1))
 
 
@@ -113,12 +114,13 @@ def plan_trial(kind: str, start_pose, rng: random.Random) -> list[Command]:
         for k in range(config.TRAINING_SEGMENTS):
             for _ in range(SEGMENT_TRIES):
                 command = _sample_command(kind, k, rng)
-                if _segment_stays_inside(pose, command):
+                if _segment_stays_inside(pose, command, commands[-1] if commands else None):
                     break
             else:
                 break  # dead end near an edge: draw the whole plan again
+            pose = nominal_step(*pose, command, config,
+                                previous=commands[-1] if commands else None)
             commands.append(command)
-            pose = nominal_step(*pose, command, config)
         if len(commands) == config.TRAINING_SEGMENTS:
             return validate_commands(commands, config, require_main_horizon=False)
     raise RuntimeError("Could not draw a plan that stays inside the workspace; "
@@ -152,9 +154,7 @@ def _print_plan(name: str, kind: str, pose, commands: list[Command]) -> None:
     print("    k      vx      vy   omega")
     for command in commands:
         print(f"  {command.k:3d}  {command.vx:+.3f}  {command.vy:+.3f}  {command.omega:+.3f}")
-    end = pose
-    for command in commands:
-        end = nominal_step(*end, command, config)
+    end = nominal_rollout(commands, pose, config)[-1]
     print(f"  nominal end: x={end[0]:.2f} m, y={end[1]:.2f} m")
 
 

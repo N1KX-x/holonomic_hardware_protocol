@@ -75,15 +75,48 @@ def _calibrated_rate(value: float, dt: float, gain: float, offset: float) -> flo
     return value*gain + offset/dt if value else 0.0
 
 
+def is_in_place_turn(command: Command | None) -> bool:
+    return command is not None and command.omega != 0 and command.vx == 0 and command.vy == 0
+
+
+def starts_turn(command: Command, previous: Command | None) -> bool:
+    """True for an in-place turn that does not continue an in-place turn the same way."""
+    return is_in_place_turn(command) and not (
+        is_in_place_turn(previous) and (previous.omega > 0) == (command.omega > 0))
+
+
+def turn_lag(command: Command, previous: Command | None, cfg) -> float:
+    """How late the modelled turning begins in this segment (0 unless it starts a turn).
+
+    A turn from standstill (`previous` None or all zero) starts later than one
+    the robot begins while its gait is already running.
+    """
+    if not starts_turn(command, previous):
+        return 0.0
+    if previous is None or (previous.vx, previous.vy, previous.omega) == (0.0, 0.0, 0.0):
+        return cfg.MODEL_TURN_LAG_S
+    return cfg.MODEL_TURN_LAG_AFTER_WALK_S
+
+
 def nominal_step(x: float, y: float, theta: float, command: Command, cfg,
-                 duration: float | None = None) -> tuple[float, float, float]:
+                 duration: float | None = None,
+                 previous: Command | None = None) -> tuple[float, float, float]:
     """Nominal model: the exact holonomic step with the calibrated gains and offsets.
 
     Each axis has one gain and one offset per direction, chosen by the sign of
     its command: over a whole segment the modelled motion along that axis is
     gain * commanded motion + offset. Backward vx has a gain only.
+
+    Two more terms come from the 2026-10-14 turn-then-walk pilots:
+    - An in-place turn that starts a turn (`previous`, the command before this
+      one, is not an in-place turn the same way) only begins MODEL_TURN_LAG_S
+      into the segment from standstill, or MODEL_TURN_LAG_AFTER_WALK_S after
+      moving. None as `previous` means the robot was standing still.
+    - Walking forward also yaws the robot by MODEL_WALK_YAW_RAD_PER_M per metre
+      of commanded forward motion (the Go2 curves left).
     """
     dt = command.dt
+    elapsed = max(0.0, (dt if duration is None else duration) - turn_lag(command, previous, cfg))
     if command.vx >= 0:
         vx = _calibrated_rate(command.vx, dt, cfg.MODEL_GAIN_VX_POS, cfg.MODEL_OFFSET_VX_POS_M)
     else:
@@ -98,7 +131,20 @@ def nominal_step(x: float, y: float, theta: float, command: Command, cfg,
     else:
         omega = _calibrated_rate(command.omega, dt, cfg.MODEL_GAIN_OMEGA_NEG,
                                  cfg.MODEL_OFFSET_OMEGA_NEG_RAD)
-    return step_holonomic(x, y, theta, vx, vy, omega, dt if duration is None else duration)
+    if command.vx > 0:
+        omega += cfg.MODEL_WALK_YAW_RAD_PER_M * command.vx
+    return step_holonomic(x, y, theta, vx, vy, omega, elapsed)
+
+
+def nominal_rollout(commands: Iterable[Command], initial_pose: tuple[float, float, float],
+                    cfg) -> list[tuple[float, float, float]]:
+    """Nominal poses at every segment boundary, starting with `initial_pose`."""
+    states = [initial_pose]
+    previous = None
+    for command in commands:
+        states.append(nominal_step(*states[-1], command, cfg, previous=previous))
+        previous = command
+    return states
 
 
 def validate_commands(commands: Iterable[Command], cfg, require_main_horizon: bool = True) -> list[Command]:
@@ -160,15 +206,11 @@ def load_sent_commands(path: Path) -> list[Command]:
 
 def nominal_boundaries(commands: list[Command], initial_pose: tuple[float, float, float], cfg):
     times = [commands[0].t_send]
-    states = [initial_pose]
-    state = initial_pose
     elapsed = 0.0
     for command in commands:
-        state = nominal_step(*state, command, cfg)
         elapsed += command.dt
         times.append(commands[0].t_send + elapsed)
-        states.append(state)
-    return times, states
+    return times, nominal_rollout(commands, initial_pose, cfg)
 
 
 def _load_mocap(path: Path, cfg):

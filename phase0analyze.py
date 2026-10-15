@@ -16,8 +16,8 @@ from types import SimpleNamespace
 from typing import Callable
 
 import config
-from core import (Command, ExecutionTrace, nominal_step, process_execution, trace_execution,
-                  validate_commands)
+from core import (Command, ExecutionTrace, is_in_place_turn, nominal_rollout, process_execution,
+                  trace_execution, validate_commands)
 from phase0 import pilot_dirs, reject_old_phase0
 
 
@@ -43,7 +43,30 @@ DIRECTIONS = (
     Direction("-omega", "MODEL_GAIN_OMEGA_NEG", "MODEL_OFFSET_OMEGA_NEG_RAD", "rad",
               "OMEGA_MAX_RADPS", lambda c: c.omega < 0),
 )
-FITTED_NAMES = tuple(name for d in DIRECTIONS for name in (d.gain, d.offset))
+
+
+@dataclass(frozen=True)
+class Term:
+    """A model parameter fitted on its own, kept within [lower, upper]."""
+    name: str
+    label: str
+    unit: str
+    scale: float
+    lower: float
+    upper: float
+    applies: Callable[[Command], bool]
+
+
+TERMS = (
+    Term("MODEL_TURN_LAG_S", "turn lag", "s", config.DT_S, 0.0, 0.9*config.DT_S,
+         is_in_place_turn),
+    Term("MODEL_TURN_LAG_AFTER_WALK_S", "lag after walk", "s", config.DT_S, 0.0, 0.9*config.DT_S,
+         is_in_place_turn),
+    Term("MODEL_WALK_YAW_RAD_PER_M", "walk yaw", "rad/m", 0.2, -math.inf, math.inf,
+         lambda c: c.vx > 0),
+)
+FITTED_NAMES = (tuple(name for d in DIRECTIONS for name in (d.gain, d.offset))
+                + tuple(t.name for t in TERMS))
 MODEL_NAMES = FITTED_NAMES + ("MODEL_GAIN_VX_NEG",)
 METRICS_CSV = config.PHASE0_ROOT / "execution_metrics.csv"
 REPORT_TXT = config.PHASE0_ROOT / "phase0_analysis.txt"
@@ -62,12 +85,9 @@ def model_from_config() -> dict[str, float]:
 
 def max_deviation(trace: ExecutionTrace, model) -> float:
     """E of one pilot under `model`: largest boundary distance between robot and model."""
-    state = trace.initial_pose
-    worst = 0.0
-    for command, (actual_x, actual_y) in zip(trace.commands, trace.actual_at_boundaries[1:]):
-        state = nominal_step(*state, command, model)
-        worst = max(worst, math.hypot(actual_x - state[0], actual_y - state[1]))
-    return worst
+    states = nominal_rollout(trace.commands, trace.initial_pose, model)
+    return max(math.hypot(actual_x - state[0], actual_y - state[1])
+               for state, (actual_x, actual_y) in zip(states[1:], trace.actual_at_boundaries[1:]))
 
 
 def _quantile(values: list[float], probability: float) -> float:
@@ -102,19 +122,19 @@ def quantile_e(traces: list[ExecutionTrace], values: dict[str, float],
 
 
 def segment_counts(traces: list[ExecutionTrace]) -> dict[str, int]:
-    """Commanded segments per direction: the data each gain and offset is fitted on."""
+    """Commanded segments per direction and term: the data each parameter is fitted on."""
     return {d.label: sum(1 for trace in traces for command in trace.commands
                          if d.applies(command))
-            for d in DIRECTIONS}
+            for d in (*DIRECTIONS, *TERMS)}
 
 
 def fit(traces: list[ExecutionTrace], rng: random.Random, iterations: int) -> dict[str, float]:
-    """Random search for the gains and offsets with the lowest q.
+    """Random search for the gains, offsets, turn lag and walk yaw with the lowest q.
 
-    Starts from the raw model (gain 1, offset 0). Every step changes either one
-    direction's gain and offset or a random set of the parameters by random
-    amounts, and keeps the change only if q drops. A direction no pilot used
-    keeps its config.py values.
+    Starts from the raw model (gain 1, offset 0, no lag, no walk yaw). Every
+    step changes either one direction's gain and offset, or one term, or a
+    random set of the parameters by random amounts, and keeps the change only
+    if q drops. A direction or term no pilot used keeps its config.py values.
     """
     counts = segment_counts(traces)
     values = model_from_config()
@@ -123,6 +143,12 @@ def fit(traces: list[ExecutionTrace], rng: random.Random, iterations: int) -> di
         if counts[d.label]:
             values[d.gain], values[d.offset] = 1.0, 0.0
             pairs.append(((d.gain, 1.0), (d.offset, getattr(config, d.limit) * config.DT_S)))
+    bounds = {}
+    for t in TERMS:
+        if counts[t.label]:
+            values[t.name] = 0.0
+            pairs.append(((t.name, t.scale),))
+            bounds[t.name] = (t.lower, t.upper)
     if not pairs:
         return values
     free = [parameter for pair in pairs for parameter in pair]
@@ -136,6 +162,8 @@ def fit(traces: list[ExecutionTrace], rng: random.Random, iterations: int) -> di
             trial[name] += rng.gauss(0.0, step * scale)
             if name.startswith("MODEL_GAIN"):
                 trial[name] = max(MIN_GAIN, trial[name])
+            if name in bounds:
+                trial[name] = min(max(bounds[name][0], trial[name]), bounds[name][1])
         score = quantile_e(traces, trial, best)
         if score < best:
             values, best = trial, score
@@ -231,6 +259,10 @@ def analyze() -> None:
         note = "" if counts[d.label] else "   (no data: config.py value kept)"
         lines.append(f"  {d.label:<9}  {counts[d.label]:8d}  {fitted[d.gain]:6.4f}  "
                      f"{fitted[d.offset]:+7.4f} {d.unit}{note}")
+    lines += ["", "  term            segments    value"]
+    for t in TERMS:
+        note = "" if counts[t.label] else "   (no data: config.py value kept)"
+        lines.append(f"  {t.label:<14}  {counts[t.label]:8d}  {fitted[t.name]:+7.4f} {t.unit}{note}")
     lines += ["", "To use the fitted model, set these lines in config.py:"]
     lines += [f"{name} = {fitted[name]!r}" for name in FITTED_NAMES]
     lines += ["", "With the fitted model:"]

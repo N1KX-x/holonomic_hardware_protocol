@@ -127,11 +127,10 @@ Keep Nova running. Keep someone on the e-stop for every pilot.
     python3 phase0analyze.py
 
     It searches for the gain and offset of each direction (+vx, +vy, -vy,
-    +omega, -omega) that minimize q, and prints the gains, the offsets,
-    E of every pilot, q and rho. The same text is saved as
+    +omega, -omega), the two turn lags and the walking yaw that minimize q, and
+    prints them, E of every pilot, q and rho. The same text is saved as
     data/phase0/phase0_analysis.txt. It does NOT change config.py: to use
-    the numbers, copy the MODEL_GAIN_* and MODEL_OFFSET_* lines from the
-    text file into config.py. You can collect more pilots and run it
+    the numbers, copy the MODEL_* lines from the text file into config.py. You can collect more pilots and run it
     again at any time; it always fits from scratch.
 
     Phase 0 is done when it prints "Status: ready" and config.py holds

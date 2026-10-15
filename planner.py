@@ -15,7 +15,7 @@ import random
 from dataclasses import dataclass
 
 import config
-from core import Command, nominal_step, wrap_angle
+from core import Command, nominal_step, turn_lag, wrap_angle
 
 
 @dataclass(frozen=True)
@@ -63,13 +63,18 @@ def _point_is_free(x: float, y: float, obstacles: tuple[Circle, ...],
 
 def _command_is_free(start, vx: float, vy: float, omega: float,
                      obstacles: tuple[Circle, ...],
-                     clearance: float, edge_clearance: float) -> bool:
-    """Sample the exact curved nominal trajectory, not its endpoint chord."""
+                     clearance: float, edge_clearance: float,
+                     previous: Command | None) -> bool:
+    """Sample the exact curved nominal trajectory, not its endpoint chord.
+
+    `previous` is the command before this one (None: the robot stands still).
+    """
     path_length_bound = math.hypot(vx, vy) * config.DT_S
     samples = max(1, math.ceil(path_length_bound / config.RRT_COLLISION_SAMPLE_SPACING_M))
     for index in range(samples + 1):
         elapsed = config.DT_S * index / samples
-        x, y, _ = nominal_step(*start, Command(0, vx, vy, omega, config.DT_S), config, elapsed)
+        x, y, _ = nominal_step(*start, Command(0, vx, vy, omega, config.DT_S), config, elapsed,
+                               previous)
         if not _point_is_free(x, y, obstacles, clearance, edge_clearance):
             return False
     return True
@@ -261,16 +266,18 @@ def _waypoints(problem: Problem, rng: random.Random, goal_radius: float,
 
 
 def _equal_steps(amount: float, rate_limit: float, fraction: float,
-                 gain: float, offset: float, dt: float) -> tuple[int, float] | None:
+                 gain: float, offset: float, dt: float,
+                 lag: float = 0.0) -> tuple[int, float] | None:
     """(segments, command) whose modelled motion covers `amount` > 0 in equal segments.
 
-    The model moves gain*command*dt + offset per segment, so the command is
-    solved from it; the commanded rate stays within (0, rate_limit].
+    The model moves at gain*command + offset/dt for all but the first `lag`
+    seconds of the segments, so the command is solved from it; the commanded
+    rate stays within (0, rate_limit].
     """
     per_segment = gain*fraction*rate_limit*dt + offset
     first = max(1, math.ceil(amount / per_segment)) if per_segment > 0 else 1
     for count in range(first, first + 100):
-        rate = (amount/count - offset) / (gain*dt)
+        rate = (amount/(count*dt - lag) - offset/dt) / gain
         if 0.0 < rate <= rate_limit:
             return count, rate
     return None
@@ -278,36 +285,47 @@ def _equal_steps(amount: float, rate_limit: float, fraction: float,
 
 def _commands_along(corners, start_theta: float, rng: random.Random,
                     full_speed: bool) -> list[Command] | None:
-    """Turn in place to face each corner, then walk straight to it."""
+    """Turn in place to face each corner, then walk straight to it.
+
+    Walking curves left by MODEL_WALK_YAW_RAD_PER_M, so each turn stops short
+    by half the leg's yaw and the curved walk ends at the corner.
+    """
     cfg, dt = config, config.DT_S
     state = (*corners[0], start_theta)
     commands: list[Command] = []
     for corner in corners[1:]:
-        turn = wrap_angle(math.atan2(corner[1]-state[1], corner[0]-state[0]) - state[2])
+        turn_fraction = 1.0 if full_speed else rng.uniform(0.5, 1.0)
+        walk_fraction = 1.0 if full_speed else rng.uniform(0.5, 1.0)
+        distance = math.dist(state[:2], corner)
+        walk = (_equal_steps(distance, cfg.VX_MAX_MPS, walk_fraction, cfg.MODEL_GAIN_VX_POS,
+                             cfg.MODEL_OFFSET_VX_POS_M, dt)
+                if distance > 1e-6 else (0, 0.0))
+        if walk is None:
+            return None
+        walk_yaw = cfg.MODEL_WALK_YAW_RAD_PER_M * walk[0] * walk[1] * dt
+        turn = wrap_angle(math.atan2(corner[1]-state[1], corner[0]-state[0])
+                          - state[2] - walk_yaw/2)
         legs = []
         if abs(turn) > 1e-6:
             if turn > 0:
                 gain, offset, sign = cfg.MODEL_GAIN_OMEGA_POS, cfg.MODEL_OFFSET_OMEGA_POS_RAD, 1.0
             else:
                 gain, offset, sign = cfg.MODEL_GAIN_OMEGA_NEG, -cfg.MODEL_OFFSET_OMEGA_NEG_RAD, -1.0
-            fraction = 1.0 if full_speed else rng.uniform(0.5, 1.0)
-            legs.append(("omega", sign, _equal_steps(abs(turn), cfg.OMEGA_MAX_RADPS, fraction,
-                                                     gain, offset, dt)))
-        distance = math.dist(state[:2], corner)
-        if distance > 1e-6:
-            fraction = 1.0 if full_speed else rng.uniform(0.5, 1.0)
-            legs.append(("vx", 1.0, _equal_steps(distance, cfg.VX_MAX_MPS, fraction,
-                                                 cfg.MODEL_GAIN_VX_POS,
-                                                 cfg.MODEL_OFFSET_VX_POS_M, dt)))
-        for axis, sign, steps in legs:
+            lag = turn_lag(Command(0, 0.0, 0.0, sign, dt), commands[-1] if commands else None,
+                           cfg)
+            steps = _equal_steps(abs(turn), cfg.OMEGA_MAX_RADPS, turn_fraction, gain, offset, dt,
+                                 lag)
             if steps is None:
                 return None
-            count, rate = steps
+            legs.append(("omega", sign, steps))
+        legs.append(("vx", 1.0, walk))
+        for axis, sign, (count, rate) in legs:
             for _ in range(count):
                 command = Command(len(commands), sign*rate if axis == "vx" else 0.0, 0.0,
                                   sign*rate if axis == "omega" else 0.0, dt)
+                state = nominal_step(*state, command, cfg,
+                                     previous=commands[-1] if commands else None)
                 commands.append(command)
-                state = nominal_step(*state, command, cfg)
     return commands
 
 
@@ -326,11 +344,13 @@ def _plan_turn_then_straight(problem: Problem, seed: int, goal_radius: float,
     else:
         return None
     state = (problem.start_x, problem.start_y, problem.start_theta)
+    previous = None
     for command in commands:
         if not _command_is_free(state, command.vx, command.vy, command.omega,
-                                problem.obstacles, clearance, edge_clearance):
+                                problem.obstacles, clearance, edge_clearance, previous):
             return None
-        state = nominal_step(*state, command, config)
+        state = nominal_step(*state, command, config, previous=previous)
+        previous = command
     if math.hypot(state[0]-problem.goal_x, state[1]-problem.goal_y) > goal_radius:
         return None
     while len(commands) < config.T_SEGMENTS:
@@ -352,9 +372,11 @@ def _plan(problem: Problem, seed: int, goal_radius: float,
         best = None
         for _ in range(config.RRT_CONTROL_SAMPLES_PER_EXPANSION):
             vx, vy, omega = _sample_control(rng)
-            nxt = nominal_step(*nearest.state, Command(0, vx, vy, omega, config.DT_S), config)
+            nxt = nominal_step(*nearest.state, Command(0, vx, vy, omega, config.DT_S), config,
+                               previous=nearest.command)
             if not _command_is_free(nearest.state, vx, vy, omega,
-                                    problem.obstacles, clearance, edge_clearance):
+                                    problem.obstacles, clearance, edge_clearance,
+                                    nearest.command):
                 continue
             score = _distance(nxt, target)
             if best is None or score < best[0]:

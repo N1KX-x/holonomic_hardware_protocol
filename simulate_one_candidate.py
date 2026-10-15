@@ -28,9 +28,11 @@ T0 = 1000.0
 def state_at(commands, initial, elapsed):
     state = initial
     remaining = max(0.0, elapsed)
+    previous = None
     for command in commands:
         duration = min(command.dt, remaining)
-        state = nominal_step(*state, command, config, duration)
+        state = nominal_step(*state, command, config, duration, previous)
+        previous = command
         remaining -= duration
         if remaining <= 1e-12:
             break
