@@ -48,7 +48,7 @@ publishes velocity commands that the Nova Go2 driver forwards to the robot.
 
     Recommended for the first runs:
     REQUIRE_OPERATOR_CONFIRMATION = True
-    (every collect then asks you to type the run/instance ID first)
+    (every run then asks you to type the pilot/trial name first)
 
 
 ----------------------------------------------------------------------
@@ -96,8 +96,8 @@ Keep Nova running. Keep someone on the e-stop for every pilot.
     space (and mocap coverage) outside it.
 
 2.2 Enter the goal in config.py: GOAL_X_M, GOAL_Y_M and GOAL_RADIUS_M.
-    The goal and the Phase 1 start (START_X_M, START_Y_M) must be at
-    least ROBOT_RADIUS_M + GOAL_RADIUS_M inside the boundary.
+    Keep the goal well inside the boundary: Phase 1 plans keep
+    PHASE1_ROBOT_RADIUS_M + rho away from the boundary.
 
 2.3 Collect one pilot. Put the robot anywhere inside the boundary, more
     than GOAL_RADIUS_M from the goal, not facing straight away from
@@ -134,7 +134,7 @@ Keep Nova running. Keep someone on the e-stop for every pilot.
     again at any time; it always fits from scratch.
 
     Phase 0 is done when it prints "Status: ready" and config.py holds
-    those lines (main.py validate checks this).
+    those lines (python3 main.py --validate checks this).
     If rho is not smaller than GOAL_RADIUS_M, the protocol's options are
     a shorter T, lower speeds, or a larger goal radius. Any of these means
     collecting the pilots again in a fresh data folder.
@@ -149,81 +149,48 @@ plan_manifest.csv) is refused. Rename it, for example to phase0_old.
 
 3.1 Check that config.py still matches the Phase 0 result:
 
-    python3 main.py validate
+    python3 main.py --validate
 
-3.2 Plan every instance (no robot motion; run only once):
+3.2 Collect one trial. Put the robot anywhere at least
+    PHASE1_ROBOT_RADIUS_M + rho inside the boundary and more than
+    GOAL_RADIUS_M from the goal, and run:
 
-    python3 main.py prepare
+    python3 main.py --execute
 
-3.3 Repeat for every instance:
+    Same as a Phase 0 pilot, except that the plan uses the frozen rho:
+    virtual obstacles and the boundary are kept PHASE1_ROBOT_RADIUS_M
+    (0.35 m) + rho away, and the goal radius shrinks by rho. Everything
+    is saved as the next trial:
 
-    a) Ask which instance is next (instances run in a random order):
+    data/phase1/trial_001/plan.csv       the velocity commands
+    data/phase1/trial_001/problem.json   start, goal, obstacles, seeds, rho
+    data/phase1/trial_001/raw/           commands sent, mocap, publish log
+    data/phase1/trial_001/trajectory.png planned and real trajectory
 
-       python3 main.py status
+    The deviation E of the trial is printed when it finishes.
+    There is no reset: walk the robot back yourself, then repeat 3.2 as
+    many times as you want. To see an example plan without moving the
+    robot, leave out --execute.
 
-       The last line prints e.g. "Next randomized instance: I047".
-
-    b) Put the robot at the start (every instance uses the same start
-       near the start corner, facing the goal corner). The program checks
-       this with mocap before each candidate (step c).
-
-    c) Collect all candidates of that instance (use the ID from step a):
-
-       python3 main.py collect I047 --execute
-
-       Before every candidate the program checks the robot's pose with
-       mocap and prints how to adjust it, e.g.
-         "Not at start: move 0.20 m forward and 0.05 m left, then turn
-          right 8 deg."
-       Adjust the robot and press Enter until it prints "OK" (within
-       0.15 m and about 10 deg). Between candidates, walk the robot back
-       to the start yourself; the same check runs again.
-       During every run the robot is stopped automatically if it comes
-       within 0.3 m of the workspace edge or mocap loses it for 0.5 s.
-       If anything fails, the whole instance is discarded and is NOT
-       rerun; just go back to step a). Pressing Ctrl+C at the very first
-       start check leaves the instance untouched.
-
-       When the instance finishes cleanly, the analysis is updated
-       automatically and the deviation E of each candidate is printed,
-       e.g.  "I047 done: largest E over 5 candidates = 0.183 m".
-       One plot per candidate is also saved in
-       data/phase1/analysis/plots/I047_C01.png ... I047_C05.png, showing
-       the obstacles, start and goal regions, the planned RRT path (blue
-       dashed), the model path from the measured start (purple dotted),
-       and the real mocap trajectory (red). Plots need matplotlib; without
-       it they are skipped and everything else still works.
-       Never discard or rerun an instance because its E looks large or
-       small; only a run that did not complete cleanly is discarded.
-       Choosing instances by their E would bias the dataset.
-
-    Repeat until status prints "Next randomized instance: none".
-
-If an instance is ever left with status "collecting" (for example the PC
-was shut down mid-run), treat it as discarded: add "_discarded" to its
-folder names in data/phase1/raw/, set its status to "discarded" in
-problems.csv, and write the reason in data/phase1/notes.txt.
+    If a run fails (the RRT finds no path, mocap loses the robot, you
+    press Ctrl+C, ...) it prints "Failed: ..." and saves nothing. Just run
+    the command again; it uses the same trial number.
+    Never delete or rerun a trial because its E looks large or small;
+    choosing trials by their E would bias the dataset.
 
 
 ----------------------------------------------------------------------
 4. ANALYSIS (no robot needed)
 ----------------------------------------------------------------------
 
-The analysis files are rewritten after every cleanly finished instance,
-so they are always up to date. To rebuild them by hand (for example after
-changing the yaw offset, or if the automatic analysis printed an error):
-
     python3 analyze_phase1.py
 
-Results are written to data/phase1/analysis/:
-    execution_metrics.csv   deviation E for every run
-    instance_metrics.csv    largest E across the candidates of each instance
-    plots/                  one trajectory plot per candidate
+Prints E of every trial and how many have E <= rho, and writes
+data/phase1/analysis/execution_metrics.csv.
 
-To draw or redraw plots by hand (works right after "main.py prepare" too;
-instances not collected yet show the planned RRT paths only):
+To redraw trajectory plots (saved in each trial folder):
 
-    python3 plot_phase1.py I047
+    python3 plot_phase1.py trial_003
     python3 plot_phase1.py all
 
 

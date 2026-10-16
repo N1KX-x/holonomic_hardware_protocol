@@ -7,8 +7,6 @@ DATA_ROOT = PROJECT_ROOT / "data"
 PHASE0_ROOT = DATA_ROOT / "phase0"
 PHASE1_ROOT = DATA_ROOT / "phase1"
 PHASE0_RESULTS_CSV = PHASE0_ROOT / "phase0_results.csv"
-PROBLEMS_CSV = PHASE1_ROOT / "problems.csv"
-NOTES_FILE = PHASE1_ROOT / "notes.txt"
 NOVA_DIR = Path.home() / "nova"
 NOVA_ENV_FILE = NOVA_DIR / "env.bash"
 
@@ -26,19 +24,6 @@ LIVE_TRACKING_TIMEOUT_S = 0.50
 
 START_POSITION_TOLERANCE_M = 0.15
 START_HEADING_TOLERANCE_RAD = 0.17  # about 10 degrees
-
-# Autonomous repositioning between candidates. This motion is recorded in a
-# separate reset folder and is never included in deviation analysis. When
-# False, the operator walks the robot back to the start between candidates.
-AUTONOMOUS_RESET_ENABLED = False
-RESET_POSITION_TOLERANCE_M = 0.10
-RESET_HEADING_TOLERANCE_RAD = 0.15
-RESET_COMMAND_DT_S = 0.5
-RESET_VX_MAX_MPS = 0.15
-RESET_VY_MAX_MPS = 0.10
-RESET_OMEGA_MAX_RADPS = 0.25
-RESET_MAX_ATTEMPTS = 10
-RESET_SETTLE_TIME_S = 0.75
 
 
 # ROS / Unitree Go2
@@ -83,6 +68,9 @@ WORKSPACE_Y_MAX_M = 2.358
 # body/control center to its furthest occupied point and add any desired fixed
 # mechanical clearance. The planner adds the learned rho separately.
 ROBOT_RADIUS_M = 0.30
+# Phase 1 only: virtual obstacles are inflated by this radius plus rho.
+# ROBOT_RADIUS_M stays frozen at its Phase 0 value (main.py checks it).
+PHASE1_ROBOT_RADIUS_M = 0.35
 
 
 
@@ -122,22 +110,16 @@ MODEL_WALK_YAW_RAD_PER_M = 0.05
 # Planning ------------------------------------------------------------------
 GOAL_RADIUS_M = 1.00
 START_REGION_RADIUS_M = 0.50
-# Fixed start and goal centers for every Phase 1 instance (only obstacles are
-# random). Each is 1.35 m in from its workspace corner, which leaves room for
-# the robot radius plus any viable rho (< GOAL_RADIUS_M). Set START_X_M = None
-# to sample start and goal at random instead. Phase 0 pilots use the same goal
-# and GOAL_RADIUS_M, but start wherever the robot stands.
+# Goal center shared by Phase 0 pilots and Phase 1 trials; both start
+# wherever the robot stands. START_X_M/START_Y_M is only the example start
+# for previews (phase0.py, main.py) and simulate_one_candidate.py.
 START_X_M = 0.881
 START_Y_M = -1.058
 GOAL_X_M = -2.364
 GOAL_Y_M = 2.067
-# None makes the robot start facing the goal.
-START_THETA_RAD = None
 # PHASE0_RESULTS_CSV supplies the frozen rho used by main.py. This fallback is
 # only written into planning templates before the Phase 0 summary exists.
 RHO_INITIAL_GUESS_M = 0.20
-CANDIDATES_PER_INSTANCE = 5
-N_POOL = 100
 MASTER_RANDOM_SEED = 20261009
 # Uploaded planner entry point. Expected callable contract is documented in
 # planner_adapter.py. Example: "my_rrt:create_candidates".
@@ -200,9 +182,8 @@ def validate() -> None:
         "VX_MAX_MPS": VX_MAX_MPS,
         "OMEGA_MAX_RADPS": OMEGA_MAX_RADPS,
         "ROBOT_RADIUS_M": ROBOT_RADIUS_M,
+        "PHASE1_ROBOT_RADIUS_M": PHASE1_ROBOT_RADIUS_M,
         "GOAL_RADIUS_M": GOAL_RADIUS_M,
-        "CANDIDATES_PER_INSTANCE": CANDIDATES_PER_INSTANCE,
-        "N_POOL": N_POOL,
         "COMMAND_HZ": COMMAND_HZ,
     }
     for name, value in positive.items():
@@ -227,24 +208,6 @@ def validate() -> None:
     if not (isinstance(VY_MAX_MPS, (int, float)) and math.isfinite(VY_MAX_MPS)
             and VY_MAX_MPS >= 0):
         raise ValueError("VY_MAX_MPS must be finite and zero or positive")
-    reset_positive = {
-        "RESET_POSITION_TOLERANCE_M": RESET_POSITION_TOLERANCE_M,
-        "RESET_HEADING_TOLERANCE_RAD": RESET_HEADING_TOLERANCE_RAD,
-        "RESET_COMMAND_DT_S": RESET_COMMAND_DT_S,
-        "RESET_VX_MAX_MPS": RESET_VX_MAX_MPS,
-        "RESET_VY_MAX_MPS": RESET_VY_MAX_MPS,
-        "RESET_OMEGA_MAX_RADPS": RESET_OMEGA_MAX_RADPS,
-        "RESET_MAX_ATTEMPTS": RESET_MAX_ATTEMPTS,
-    }
-    for name, value in reset_positive.items():
-        if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
-            raise ValueError(f"{name} must be finite and positive")
-    # The reset limits only matter when the autonomous reset can run.
-    if AUTONOMOUS_RESET_ENABLED:
-        if RESET_VX_MAX_MPS > VX_MAX_MPS or RESET_VY_MAX_MPS > VY_MAX_MPS:
-            raise ValueError("Reset translation limits cannot exceed experiment limits")
-        if RESET_OMEGA_MAX_RADPS > OMEGA_MAX_RADPS:
-            raise ValueError("Reset yaw limit cannot exceed experiment limit")
     if EDGE_STOP_MARGIN_M is not None and not (
             isinstance(EDGE_STOP_MARGIN_M, (int, float)) and EDGE_STOP_MARGIN_M >= 0):
         raise ValueError("EDGE_STOP_MARGIN_M must be None or a non-negative number")
@@ -283,19 +246,3 @@ def validate() -> None:
             and 2 * TRAINING_PLAN_MARGIN_M < min(WORKSPACE_X_MAX_M - WORKSPACE_X_MIN_M,
                                                  WORKSPACE_Y_MAX_M - WORKSPACE_Y_MIN_M)):
         raise ValueError("TRAINING_PLAN_MARGIN_M must leave room inside the workspace")
-
-
-def validate_phase1_course() -> None:
-    """Phase 1 only: the fixed start and goal must leave room for any viable rho.
-
-    Other programs (Phase 0, yaw calibration, training) do not use them.
-    """
-    if START_X_M is None:
-        return
-    # Any viable rho is below GOAL_RADIUS_M, so this clearance always suffices.
-    clearance = ROBOT_RADIUS_M + GOAL_RADIUS_M
-    for name, x, y in (("start", START_X_M, START_Y_M), ("goal", GOAL_X_M, GOAL_Y_M)):
-        if not (WORKSPACE_X_MIN_M + clearance <= x <= WORKSPACE_X_MAX_M - clearance
-                and WORKSPACE_Y_MIN_M + clearance <= y <= WORKSPACE_Y_MAX_M - clearance):
-            raise ValueError(f"Phase 1 fixed {name} (START_X_M/GOAL_X_M ...) must be at "
-                             f"least {clearance:.2f} m inside the workspace")

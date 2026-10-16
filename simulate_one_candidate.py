@@ -16,7 +16,7 @@ from matplotlib.patches import Circle as CirclePatch
 
 import config
 from core import nominal_step, process_execution
-from planner import plan_candidate, sample_problem
+from planner import plan_candidate, sample_trial_problem
 
 
 OUTPUT = config.PROJECT_ROOT / "simulation_output" / "candidate_001"
@@ -46,7 +46,10 @@ def run() -> Path:
     raw.mkdir(parents=True)
     problem_seed = config.MASTER_RANDOM_SEED + 10000
     candidate_seed = problem_seed + 1
-    problem = sample_problem(1, problem_seed, RHO_M)
+    start_theta = math.atan2(config.GOAL_Y_M - config.START_Y_M,
+                             config.GOAL_X_M - config.START_X_M)
+    problem = sample_trial_problem(1, problem_seed,
+                                   (config.START_X_M, config.START_Y_M, start_theta), RHO_M)
     commands = plan_candidate(problem, candidate_seed, RHO_M)
     if commands is None:
         raise RuntimeError("Deterministic demonstration candidate was not found")
@@ -58,7 +61,7 @@ def run() -> Path:
             "problem_seed": problem_seed,
             "candidate_seed": candidate_seed,
             "rho_m": RHO_M,
-            "robot_radius_m": config.ROBOT_RADIUS_M,
+            "robot_radius_m": config.PHASE1_ROBOT_RADIUS_M,
             "start": initial,
             "goal": {"x": problem.goal_x, "y": problem.goal_y,
                      "radius_m": config.GOAL_RADIUS_M,
@@ -121,7 +124,7 @@ def run() -> Path:
     figure, axis = plt.subplots(figsize=(8, 7))
     for obstacle in problem.obstacles:
         axis.add_patch(CirclePatch((obstacle.x, obstacle.y),
-                                  obstacle.radius+config.ROBOT_RADIUS_M+RHO_M,
+                                  obstacle.radius+config.PHASE1_ROBOT_RADIUS_M+RHO_M,
                                   color="tab:red", alpha=0.15))
         axis.add_patch(CirclePatch((obstacle.x, obstacle.y), obstacle.radius,
                                   color="tab:red", alpha=0.55, label="Virtual obstacle"))

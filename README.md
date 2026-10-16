@@ -4,7 +4,7 @@ This folder implements the two-phase protocol in
 `hardware_protocol_full_holonomic.md`. It separates:
 
 - Phase 0 deviation pilots (`phase0.py`) and their model fit (`phase0analyze.py`)
-- Phase 1 problem/candidate generation and collection (`main.py`)
+- Phase 1 trial collection (`main.py`)
 - offline Phase 1 deviation analysis (`analyze_phase1.py`)
 - hardware-free model/CSV code (`core.py`)
 - robot and mocap processes (`hardware/`)
@@ -97,60 +97,46 @@ numbers.
 
 ## Phase 1 workflow
 
-```bash
-python3 main.py validate
-python3 main.py prepare
-python3 main.py status
-```
-
-`prepare` is planning-only. It samples all problems without conditioning on
-success, generates `m` seeded candidates, shuffles their order, records empty
-instances, and writes the randomized collection order.
-
-Collect exactly one instance at a time:
+Phase 1 works like Phase 0: every call collects one trial, saved as the next
+`trial_NNN`. There is no fixed number of trials and no reset; walk the robot
+back yourself between trials. First check that `config.py` still matches the
+Phase 0 result:
 
 ```bash
-python3 main.py collect I001 --execute
+python3 main.py --validate
 ```
 
-Every instance uses the same start and goal (`START_X_M`, `GOAL_X_M`, ... in
-`config.py`, near opposite corners of the mat); only the obstacle layout is
-random. The robot starts facing the goal. Before every candidate, a live mocap
-check (`hardware/start_check.py`) prints how to move the robot and waits until
-it is within `START_POSITION_TOLERANCE_M` and `START_HEADING_TOLERANCE_RAD` of
-the start. With `AUTONOMOUS_RESET_ENABLED = False` (the default) the operator
-walks the robot back between candidates; with `True` the mocap-guided
-autonomous reset runs first and the same check follows.
+Then, for every trial, put the robot anywhere at least
+`PHASE1_ROBOT_RADIUS_M + rho` inside the boundary and more than
+`GOAL_RADIUS_M` from the goal, and run:
+
+```bash
+python3 main.py --execute
+```
+
+It reads the robot's pose from mocap, draws random virtual obstacles, and
+plans an RRT path from that pose to within `GOAL_RADIUS_M - rho` of
+(`GOAL_X_M`, `GOAL_Y_M`), with `rho` frozen from
+`data/phase0/phase0_results.csv`. Obstacles and the boundary are inflated by
+`PHASE1_ROBOT_RADIUS_M + rho` (`PHASE1_ROBOT_RADIUS_M` is separate from
+`ROBOT_RADIUS_M`, which stays frozen at its Phase 0 value). Without
+`--execute` it only previews a plan.
 
 During every run, the collector stops the robot if its body center comes within
 `EDGE_STOP_MARGIN_M` of the workspace edge, or if mocap loses it for
-`LIVE_TRACKING_TIMEOUT_S`. The run then fails like any other.
+`LIVE_TRACKING_TIMEOUT_S`. A call that fails for any reason (no path, tracking
+lost, Ctrl+C) leaves nothing behind, so the next call uses the same number.
 
-If any candidate fails, every raw run belonging to that instance is renamed
-with `_discarded` and the instance status becomes `discarded`. It is not rerun.
-
-After each instance completes cleanly, `collect` reruns the offline analysis
-and prints that instance's per-candidate deviations. The analysis only runs
-after the instance is saved as `ok`, so an analysis error never discards
-collected data. It can also be rerun by hand at any time:
+After each trial it prints E and saves `trajectory.png` in the trial folder.
+The summary over all trials can be rebuilt at any time:
 
 ```bash
 python3 analyze_phase1.py
-```
-
-It writes per-execution deviations and the maximum deviation across all `m`
-candidates for each complete instance.
-
-`collect` also saves one plot per candidate in `data/phase1/analysis/plots/`:
-virtual obstacles (real and inflated), start and goal regions, the planned RRT
-path, the nominal model from the measured start, the real mocap trajectory,
-and the largest deviation. Plots can be drawn at any time, including for
-instances not yet collected (planned paths only):
-
-```bash
-python3 plot_phase1.py I001
 python3 plot_phase1.py all
 ```
+
+`analyze_phase1.py` writes E, `rho` and whether E <= rho for every trial to
+`data/phase1/analysis/execution_metrics.csv`.
 
 ## Training data for a learned model
 
@@ -182,13 +168,11 @@ data/
     execution_metrics.csv
     phase0_results.csv
   phase1/
-    notes.txt
-    problems.csv
-    collection_order.csv
-    plans/I001/C01.csv
-    raw/I001_C01/{commands.csv,mocap.csv,publish_log.csv}
-    resets/I001_after_C01/attempt_01/{reset_plan.csv,raw/...}
-    analysis/{execution_metrics.csv,instance_metrics.csv}
+    trial_001/plan.csv           planned velocity commands
+    trial_001/problem.json       start, goal, obstacles, seeds, rho, robot radius
+    trial_001/raw/{commands.csv,mocap.csv,publish_log.csv}
+    trial_001/trajectory.png     planned and real trajectory
+    analysis/execution_metrics.csv
 ```
 
 Raw mocap stores uncorrected `theta_raw`; calibration is applied only during
@@ -212,10 +196,10 @@ collision checking. The following were changed to match the protocol:
 - variable 0.2–0.5 s commands became exactly `DT_S`;
 - online lidar discovery/replanning was removed because obstacles are virtual;
 - obstacles are inflated by the frozen Phase 0 `rho`;
-- physical obstacle geometry is first inflated by `ROBOT_RADIUS_M`, then by
-  the separate learned `rho`, so the robot center stays clear of both;
+- physical obstacle geometry is first inflated by `PHASE1_ROBOT_RADIUS_M`, then
+  by the separate learned `rho`, so the robot center stays clear of both;
 - the goal acceptance radius is shrunk to `GOAL_RADIUS_M - rho`;
-- every candidate has exactly `T_SEGMENTS` commands;
+- every plan has exactly `T_SEGMENTS` commands;
 - planner failures are recorded rather than resampled away.
 
 The original `kinodynamic_rrt.py` also advances distance without multiplying

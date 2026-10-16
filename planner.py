@@ -81,7 +81,7 @@ def _command_is_free(start, vx: float, vy: float, omega: float,
 
 
 def _sample_obstacles(rng: random.Random, start, goal, goal_radius: float,
-                      rho: float) -> tuple[Circle, ...] | None:
+                      rho: float, robot_radius: float) -> tuple[Circle, ...] | None:
     """Draw one obstacle layout clear of the start and goal regions, or None if it does not fit."""
     count = rng.randint(config.OBSTACLE_COUNT_MIN, config.OBSTACLE_COUNT_MAX)
     obstacles: list[Circle] = []
@@ -93,7 +93,7 @@ def _sample_obstacles(rng: random.Random, start, goal, goal_radius: float,
                             config.WORKSPACE_X_MAX_M - radius)
             y = rng.uniform(config.WORKSPACE_Y_MIN_M + radius,
                             config.WORKSPACE_Y_MAX_M - radius)
-            protected_radius = radius + config.ROBOT_RADIUS_M + rho
+            protected_radius = radius + robot_radius + rho
             protects_start = math.hypot(x-start[0], y-start[1]) <= protected_radius + config.START_REGION_RADIUS_M
             protects_goal = math.hypot(x-goal[0], y-goal[1]) <= protected_radius + goal_radius
             overlaps = any(math.hypot(x-o.x, y-o.y) <= radius + o.radius for o in obstacles)
@@ -105,38 +105,6 @@ def _sample_obstacles(rng: random.Random, start, goal, goal_radius: float,
     return tuple(obstacles)
 
 
-def sample_problem(instance: int, seed: int, rho: float) -> Problem:
-    """Sample one reproducible problem without conditioning on RRT success."""
-    rng = random.Random(seed)
-    margin = (max(config.GOAL_RADIUS_M, config.OBSTACLE_RADIUS_MAX_M)
-              + config.ROBOT_RADIUS_M + rho)
-    for _ in range(10000):
-        if config.START_X_M is None:
-            start_x = rng.uniform(config.WORKSPACE_X_MIN_M + margin,
-                                  config.WORKSPACE_X_MAX_M - margin)
-            start_y = rng.uniform(config.WORKSPACE_Y_MIN_M + margin,
-                                  config.WORKSPACE_Y_MAX_M - margin)
-            goal_x = rng.uniform(config.WORKSPACE_X_MIN_M + margin,
-                                 config.WORKSPACE_X_MAX_M - margin)
-            goal_y = rng.uniform(config.WORKSPACE_Y_MIN_M + margin,
-                                 config.WORKSPACE_Y_MAX_M - margin)
-            if math.hypot(goal_x-start_x, goal_y-start_y) < 2.0*config.GOAL_RADIUS_M:
-                continue
-            start_theta = 0.0
-        else:
-            # Fixed start and goal: only the obstacle layout differs per instance.
-            start_x, start_y = config.START_X_M, config.START_Y_M
-            goal_x, goal_y = config.GOAL_X_M, config.GOAL_Y_M
-            start_theta = (math.atan2(goal_y-start_y, goal_x-start_x)
-                           if config.START_THETA_RAD is None else config.START_THETA_RAD)
-        obstacles = _sample_obstacles(rng, (start_x, start_y), (goal_x, goal_y),
-                                      config.GOAL_RADIUS_M, rho)
-        if obstacles is not None:
-            return Problem(instance, start_x, start_y, start_theta, goal_x, goal_y,
-                           obstacles, seed)
-    raise RuntimeError("Could not sample a valid planning problem")
-
-
 def sample_pilot_problem(number: int, seed: int,
                          start: tuple[float, float, float]) -> Problem:
     """Phase 0 problem: the measured start pose, the configured goal, random obstacles.
@@ -144,10 +112,23 @@ def sample_pilot_problem(number: int, seed: int,
     rho is not known in Phase 0, so obstacles keep clear of the regions by the
     robot radius only.
     """
+    return _sample_from_pose(number, seed, start, 0.0, config.ROBOT_RADIUS_M)
+
+
+def sample_trial_problem(number: int, seed: int, start: tuple[float, float, float],
+                         rho: float) -> Problem:
+    """Phase 1 problem: like a pilot, but obstacles keep clear of the start and
+    goal regions by PHASE1_ROBOT_RADIUS_M + rho."""
+    return _sample_from_pose(number, seed, start, rho, config.PHASE1_ROBOT_RADIUS_M)
+
+
+def _sample_from_pose(number: int, seed: int, start: tuple[float, float, float],
+                      rho: float, robot_radius: float) -> Problem:
     rng = random.Random(seed)
     goal = (config.GOAL_X_M, config.GOAL_Y_M)
     for _ in range(10000):
-        obstacles = _sample_obstacles(rng, start, goal, config.GOAL_RADIUS_M, 0.0)
+        obstacles = _sample_obstacles(rng, start, goal, config.GOAL_RADIUS_M, rho,
+                                      robot_radius)
         if obstacles is not None:
             return Problem(number, *start, *goal, obstacles, seed)
     raise RuntimeError("Could not sample a valid planning problem")
@@ -204,10 +185,11 @@ def _extract(node: Node) -> list[Command]:
 
 
 def plan_candidate(problem: Problem, seed: int, rho: float) -> list[Command] | None:
-    """Return a fixed-horizon control sequence, or None without resampling."""
+    """Phase 1 plan, or None: obstacles and the workspace edge are kept
+    PHASE1_ROBOT_RADIUS_M + rho away, and the goal radius shrinks by rho."""
     if not 0.0 < rho < config.GOAL_RADIUS_M:
         raise ValueError("rho must satisfy 0 < rho < GOAL_RADIUS_M")
-    clearance = config.ROBOT_RADIUS_M + rho
+    clearance = config.PHASE1_ROBOT_RADIUS_M + rho
     planner = _plan_turn_then_straight if config.PLANNER_TURN_THEN_STRAIGHT else _plan
     return planner(problem, seed, config.GOAL_RADIUS_M - rho, clearance, clearance)
 
