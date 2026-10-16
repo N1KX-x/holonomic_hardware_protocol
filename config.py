@@ -124,10 +124,10 @@ MASTER_RANDOM_SEED = 20261009
 # Uploaded planner entry point. Expected callable contract is documented in
 # planner_adapter.py. Example: "my_rrt:create_candidates".
 PLANNER_ENTRY_POINT = ""
-OBSTACLE_COUNT_MIN = 4
-OBSTACLE_COUNT_MAX = 6
-OBSTACLE_RADIUS_MIN_M = 0.20
-OBSTACLE_RADIUS_MAX_M = 0.40
+OBSTACLE_COUNT_MIN = 2
+OBSTACLE_COUNT_MAX = 4
+OBSTACLE_RADIUS_MIN_M = 0.10
+OBSTACLE_RADIUS_MAX_M = 0.30
 RRT_MAX_ITERATIONS = 10000
 # True: plans are polylines. An RRT over positions finds waypoints (edges of
 # up to RRT_STEP_M, then shortcut), and the robot turns in place to face each
@@ -146,23 +146,6 @@ RRT_HEADING_WEIGHT = 0.10
 PHASE0_FIT_ITERATIONS = 50000
 PILOT_HIGH_QUANTILE = 0.90
 RHO_MULTIPLIER = 1.05
-
-
-# Training data for a learned dynamics model ---------------------------------
-# collect_training.py drives one random command sequence per call and saves it
-# as the next free trial_NNN. These runs only train a model; they are never
-# used for Phase 0 calibration or Phase 1.
-TRAINING_ROOT = DATA_ROOT / "training"
-TRAINING_SEGMENTS = 20
-# Trials come in blocks of this many mixed (vx, vy, omega) runs plus one
-# vx-only, one vy-only and one omega-only run, in a seeded random order.
-# 12 makes 12 of every 15 trials mixed (80 %).
-TRAINING_MIXED_PER_BLOCK = 12
-TRAINING_RANDOM_SEED = 20261010
-# Commands are drawn from the measured start pose so that the nominal path
-# stays at least this far inside the workspace. The real path drifts from the
-# nominal one, so keep EDGE_STOP_MARGIN_M set as well.
-TRAINING_PLAN_MARGIN_M = 0.50
 
 
 # Session metadata ----------------------------------------------------------
@@ -238,11 +221,8 @@ def validate() -> None:
     for name, value in safety_positive.items():
         if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
             raise ValueError(f"{name} must be finite and positive")
-    if not isinstance(TRAINING_SEGMENTS, int) or TRAINING_SEGMENTS < 1:
-        raise ValueError("TRAINING_SEGMENTS must be a positive integer")
-    if not isinstance(TRAINING_MIXED_PER_BLOCK, int) or TRAINING_MIXED_PER_BLOCK < 0:
-        raise ValueError("TRAINING_MIXED_PER_BLOCK must be a non-negative integer")
-    if not (isinstance(TRAINING_PLAN_MARGIN_M, (int, float)) and TRAINING_PLAN_MARGIN_M >= 0
-            and 2 * TRAINING_PLAN_MARGIN_M < min(WORKSPACE_X_MAX_M - WORKSPACE_X_MIN_M,
-                                                 WORKSPACE_Y_MAX_M - WORKSPACE_Y_MIN_M)):
-        raise ValueError("TRAINING_PLAN_MARGIN_M must leave room inside the workspace")
+    if not (isinstance(OBSTACLE_COUNT_MIN, int) and isinstance(OBSTACLE_COUNT_MAX, int)
+            and 0 <= OBSTACLE_COUNT_MIN <= OBSTACLE_COUNT_MAX):
+        raise ValueError("Need integers 0 <= OBSTACLE_COUNT_MIN <= OBSTACLE_COUNT_MAX")
+    if not 0 < OBSTACLE_RADIUS_MIN_M <= OBSTACLE_RADIUS_MAX_M:
+        raise ValueError("Need 0 < OBSTACLE_RADIUS_MIN_M <= OBSTACLE_RADIUS_MAX_M")
