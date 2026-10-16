@@ -106,8 +106,7 @@ Phase 0 result:
 python3 main.py --validate
 ```
 
-Then, for every trial, put the robot anywhere at least
-`PHASE1_ROBOT_RADIUS_M + rho` inside the boundary and more than
+Then, for every trial, put the robot anywhere inside the boundary, more than
 `GOAL_RADIUS_M` from the goal, and run:
 
 ```bash
@@ -117,9 +116,10 @@ python3 main.py --execute
 It reads the robot's pose from mocap, draws random virtual obstacles, and
 plans an RRT path from that pose to within `GOAL_RADIUS_M - rho` of
 (`GOAL_X_M`, `GOAL_Y_M`), with `rho` frozen from
-`data/phase0/phase0_results.csv`. Obstacles and the boundary are inflated by
+`data/phase0/phase0_results.csv`. Obstacles are inflated by
 `PHASE1_ROBOT_RADIUS_M + rho` (`PHASE1_ROBOT_RADIUS_M` is separate from
-`ROBOT_RADIUS_M`, which stays frozen at its Phase 0 value). Without
+`ROBOT_RADIUS_M`, which stays frozen at its Phase 0 value). As in Phase 0, no
+margin is kept at the boundary: the body center may reach it. Without
 `--execute` it only previews a plan.
 
 During every run, the collector stops the robot if its body center comes within

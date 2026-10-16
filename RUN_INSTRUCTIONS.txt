@@ -96,8 +96,7 @@ Keep Nova running. Keep someone on the e-stop for every pilot.
     space (and mocap coverage) outside it.
 
 2.2 Enter the goal in config.py: GOAL_X_M, GOAL_Y_M and GOAL_RADIUS_M.
-    Keep the goal well inside the boundary: Phase 1 plans keep
-    PHASE1_ROBOT_RADIUS_M + rho away from the boundary.
+    Phase 1 uses the same goal and keeps the goal radius shrunk by rho.
 
 2.3 Collect one pilot. Put the robot anywhere inside the boundary, more
     than GOAL_RADIUS_M from the goal, not facing straight away from
@@ -151,16 +150,15 @@ plan_manifest.csv) is refused. Rename it, for example to phase0_old.
 
     python3 main.py --validate
 
-3.2 Collect one trial. Put the robot anywhere at least
-    PHASE1_ROBOT_RADIUS_M + rho inside the boundary and more than
-    GOAL_RADIUS_M from the goal, and run:
+3.2 Collect one trial. Put the robot anywhere inside the boundary, more
+    than GOAL_RADIUS_M from the goal, and run:
 
     python3 main.py --execute
 
     Same as a Phase 0 pilot, except that the plan uses the frozen rho:
-    virtual obstacles and the boundary are kept PHASE1_ROBOT_RADIUS_M
-    (0.35 m) + rho away, and the goal radius shrinks by rho. Everything
-    is saved as the next trial:
+    virtual obstacles are kept PHASE1_ROBOT_RADIUS_M (0.35 m) + rho
+    away, and the goal radius shrinks by rho. As in Phase 0, no margin is
+    kept at the boundary. Everything is saved as the next trial:
 
     data/phase1/trial_001/plan.csv       the velocity commands
     data/phase1/trial_001/problem.json   start, goal, obstacles, seeds, rho

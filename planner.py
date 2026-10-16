@@ -185,13 +185,14 @@ def _extract(node: Node) -> list[Command]:
 
 
 def plan_candidate(problem: Problem, seed: int, rho: float) -> list[Command] | None:
-    """Phase 1 plan, or None: obstacles and the workspace edge are kept
-    PHASE1_ROBOT_RADIUS_M + rho away, and the goal radius shrinks by rho."""
+    """Phase 1 plan, or None: obstacles are kept PHASE1_ROBOT_RADIUS_M + rho away
+    and the goal radius shrinks by rho. As in Phase 0, the body center may reach
+    the workspace edge."""
     if not 0.0 < rho < config.GOAL_RADIUS_M:
         raise ValueError("rho must satisfy 0 < rho < GOAL_RADIUS_M")
     clearance = config.PHASE1_ROBOT_RADIUS_M + rho
     planner = _plan_turn_then_straight if config.PLANNER_TURN_THEN_STRAIGHT else _plan
-    return planner(problem, seed, config.GOAL_RADIUS_M - rho, clearance, clearance)
+    return planner(problem, seed, config.GOAL_RADIUS_M - rho, clearance, 0.0)
 
 
 def plan_pilot(problem: Problem, seed: int) -> list[Command] | None:

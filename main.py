@@ -109,11 +109,9 @@ def reject_old_phase1(root: Path | None = None) -> None:
 def plan_trial(number: int, pose, seed: int, rho: float) -> tuple[Problem, list[Command]]:
     """RRT plan from `pose` to the goal region shrunk by rho; raises if this pose has no plan."""
     x, y, _ = pose
-    clearance = config.PHASE1_ROBOT_RADIUS_M + rho
-    if not (config.WORKSPACE_X_MIN_M + clearance <= x <= config.WORKSPACE_X_MAX_M - clearance
-            and config.WORKSPACE_Y_MIN_M + clearance <= y <= config.WORKSPACE_Y_MAX_M - clearance):
-        raise RuntimeError(f"Robot at x={x:.2f}, y={y:.2f} is closer than {clearance:.2f} m "
-                           "(PHASE1_ROBOT_RADIUS_M + rho) to the boundary")
+    if not (config.WORKSPACE_X_MIN_M <= x <= config.WORKSPACE_X_MAX_M
+            and config.WORKSPACE_Y_MIN_M <= y <= config.WORKSPACE_Y_MAX_M):
+        raise RuntimeError(f"Robot at x={x:.2f}, y={y:.2f} is outside the boundary")
     distance = math.hypot(config.GOAL_X_M - x, config.GOAL_Y_M - y)
     if distance <= config.GOAL_RADIUS_M:
         raise RuntimeError(f"Robot is already {distance:.2f} m from the goal, inside its "
