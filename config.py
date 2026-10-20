@@ -20,8 +20,6 @@ MOCAP_TRAIL_TIME_S = 0.5
 MAX_TRACKING_GAP_S = 0.20
 EDGE_STOP_MARGIN_M = None
 LIVE_TRACKING_TIMEOUT_S = 0.50
-
-
 START_POSITION_TOLERANCE_M = 0.15
 START_HEADING_TOLERANCE_RAD = 0.17  # about 10 degrees
 
@@ -39,7 +37,6 @@ MOCAP_CLIENT_IP = "192.168.0.241"
 MOCAP_SERVER_IP = "192.168.0.245"
 MOCAP_USE_MULTICAST = True
 RIGID_BODY_ID = 1006
-# Motive is Y-up. Experiment world x=Motive X and y=-Motive Z.
 MOCAP_GROUND_X_SIGN = 1.0
 MOCAP_GROUND_Y_SIGN = -1.0
 
@@ -50,59 +47,68 @@ MARKER_TO_BODY_X_M = -0.07
 MARKER_TO_BODY_Y_M = -0.01
 POSITIVE_YAW_COMMAND_SIGN = 1.0
 POSITIVE_LATERAL_COMMAND_SIGN = 1.0
-# yaw_offset_calibration.py drives straight forward with this single vx-only
-# command and prints the YAW_OFFSET_RAD it measures.
 YAW_CALIBRATION_ROOT = DATA_ROOT / "yaw_calibration"
 YAW_CALIBRATION_VX_MPS = 0.25
 YAW_CALIBRATION_DURATION_S = 5.0
 
 
-# Workspace in mocap world coordinates (replace after mapping capture area) --
-# Largest axis-aligned rectangle inside the four measured mat corners:
-# start (2.454, -3.039), (2.231, 2.903), goal (-3.587, 2.776), (-3.362, -2.408).
+#Map setting-------------------------------------------
 WORKSPACE_X_MIN_M = -2.826
 WORKSPACE_X_MAX_M = 1.830
 WORKSPACE_Y_MIN_M = -2.492
 WORKSPACE_Y_MAX_M = 2.358
-# Conservative planar footprint radius of the robot. Measure from the robot's
-# body/control center to its furthest occupied point and add any desired fixed
-# mechanical clearance. The planner adds the learned rho separately.
-ROBOT_RADIUS_M = 0.30
-# Phase 1 only: virtual obstacles are inflated by this radius plus rho.
-# ROBOT_RADIUS_M stays frozen at its Phase 0 value (main.py checks it).
+ROBOT_RADIUS_M = 0.35
 PHASE1_ROBOT_RADIUS_M = 0.35
 
 
-
-DT_S = 1.0
-T_SEGMENTS = 25
+#Velocity command setting-------------------------------------------
+DT_S = 2.0
+T_SEGMENTS = 15
 VX_MAX_MPS = 0.5
-VY_MAX_MPS = 0.5
-OMEGA_MAX_RADPS = 0.5
-# Optional combined translational limit. Set None if the interface has none.
+VY_MAX_MPS = 0.2
+OMEGA_MAX_RADPS = 0.2
+DIAG_SPEED_SUM_MAX_MPS = 0.2
+ARC_VX_MAX_MPS = 0.2
+ARC_OMEGA_MAX_RADPS = 0.2
 TRANSLATIONAL_SPEED_MAX_MPS = None
 
-# Nominal model (core.nominal_step). Per command segment, the modelled motion
-# along each axis is gain * commanded motion + offset (m, or rad for omega).
-# Values measured on the 2026-10-14 turn-then-walk pilots.
+#Tuning parameters for gain and offset---------------------------------------
+#Vx Setting--------
 MODEL_GAIN_VX_POS = 1.05     # forward
 MODEL_OFFSET_VX_POS_M = 0.0
-# Backward and sideways motion are not used: gain 0 models no motion.
-MODEL_GAIN_VX_NEG = 0.0      # backward
-MODEL_GAIN_VY_POS = 0.0      # sideways to the robot's left
+MODEL_GAIN_VX_NEG = 0.0      # backward set
+
+#Vy seeting--------
+MODEL_GAIN_VY_POS = 1.00     # sideways to the robot's left
 MODEL_OFFSET_VY_POS_M = 0.0
-MODEL_GAIN_VY_NEG = 0.0      # sideways to the robot's right
+MODEL_GAIN_VY_NEG = 0.74     # sideways to the robot's right
 MODEL_OFFSET_VY_NEG_M = 0.0
+
+#Omega Seeting------------
 MODEL_GAIN_OMEGA_POS = 0.70  # turning left (counterclockwise)
 MODEL_OFFSET_OMEGA_POS_RAD = 0.0
 MODEL_GAIN_OMEGA_NEG = 0.70  # turning right (clockwise)
 MODEL_OFFSET_OMEGA_NEG_RAD = 0.0
-# An in-place turn begins this late from standstill, and this late right
-# after walking (the gait is already running).
+
+#Diagnal Velocity Setting------
+MODEL_GAIN_DIAG_VX = 1.05
+MODEL_OFFSET_DIAG_VX_M = 0.0
+MODEL_GAIN_DIAG_VY_POS = 1.00  # diagonal to the robot's left
+MODEL_OFFSET_DIAG_VY_POS_M = 0.0
+MODEL_GAIN_DIAG_VY_NEG = 0.74  # diagonal to the robot's right
+MODEL_OFFSET_DIAG_VY_NEG_M = 0.0
+
+#Arc Seeting
+MODEL_GAIN_ARC_VX = 1.05
+MODEL_OFFSET_ARC_VX_M = 0.0
+MODEL_GAIN_ARC_OMEGA_POS = 0.80  # arcing left
+MODEL_OFFSET_ARC_OMEGA_POS_RAD = 0.0
+MODEL_GAIN_ARC_OMEGA_NEG = 0.80  # arcing right
+MODEL_OFFSET_ARC_OMEGA_NEG_RAD = 0.0
+
+
 MODEL_TURN_LAG_S = 0.30
 MODEL_TURN_LAG_AFTER_WALK_S = 0.10
-# Walking forward yaws the robot left by this much per metre of commanded
-# forward motion (about 2.9 deg/m).
 MODEL_WALK_YAW_RAD_PER_M = 0.05
 
 
@@ -110,38 +116,31 @@ MODEL_WALK_YAW_RAD_PER_M = 0.05
 # Planning ------------------------------------------------------------------
 GOAL_RADIUS_M = 1.00
 START_REGION_RADIUS_M = 0.50
-# Goal center shared by Phase 0 pilots and Phase 1 trials; both start
-# wherever the robot stands. START_X_M/START_Y_M is only the example start
-# for previews (phase0.py, main.py) and simulate_one_candidate.py.
 START_X_M = 0.881
 START_Y_M = -1.058
 GOAL_X_M = -2.364
 GOAL_Y_M = 2.067
-# PHASE0_RESULTS_CSV supplies the frozen rho used by main.py. This fallback is
-# only written into planning templates before the Phase 0 summary exists.
 RHO_INITIAL_GUESS_M = 0.20
 MASTER_RANDOM_SEED = 20261009
-# Uploaded planner entry point. Expected callable contract is documented in
-# planner_adapter.py. Example: "my_rrt:create_candidates".
+
 PLANNER_ENTRY_POINT = ""
 OBSTACLE_COUNT_MIN = 2
 OBSTACLE_COUNT_MAX = 4
 OBSTACLE_RADIUS_MIN_M = 0.10
 OBSTACLE_RADIUS_MAX_M = 0.30
 RRT_MAX_ITERATIONS = 10000
-# True: plans are polylines. An RRT over positions finds waypoints (edges of
-# up to RRT_STEP_M, then shortcut), and the robot turns in place to face each
-# waypoint and walks straight to it (vx and omega only, never together).
-# False: the kinodynamic RRT that samples (vx, vy, omega) every segment.
 PLANNER_TURN_THEN_STRAIGHT = True
+PLANNER_LEG_KINDS = ("vy", "vx+vy", "vx+omega")
+PLANNER_LEG_SHARES = (0.25, 0.5, 0.75, 1.0)
+PLANNER_MIXED_ATTEMPTS = 40
+PLANNER_ARC_BEARING_MIN_RAD = 0.17  # about 10 degrees
+PLANNER_ARC_BEARING_MAX_RAD = 0.70  # about 40 degrees
 RRT_STEP_M = 0.5
 RRT_GOAL_SAMPLE_RATE = 0.30
 RRT_CONTROL_SAMPLES_PER_EXPANSION = 30
 RRT_COLLISION_SAMPLE_SPACING_M = 0.025
 RRT_POSITION_WEIGHT = 1.0
 RRT_HEADING_WEIGHT = 0.10
-
-
 # Phase 0 pilot Minimizer
 PHASE0_FIT_ITERATIONS = 50000
 PILOT_HIGH_QUANTILE = 0.90
@@ -187,24 +186,40 @@ def validate() -> None:
         raise ValueError("The goal must be inside the workspace")
     if not isinstance(PHASE0_FIT_ITERATIONS, int) or PHASE0_FIT_ITERATIONS < 1:
         raise ValueError("PHASE0_FIT_ITERATIONS must be a positive integer")
-    # 0 turns sideways motion off: plans then only walk forward and turn in place.
-    if not (isinstance(VY_MAX_MPS, (int, float)) and math.isfinite(VY_MAX_MPS)
-            and VY_MAX_MPS >= 0):
-        raise ValueError("VY_MAX_MPS must be finite and zero or positive")
+    # 0 turns that command off: plans then never use it.
+    for name in ("VY_MAX_MPS", "DIAG_SPEED_SUM_MAX_MPS", "ARC_VX_MAX_MPS",
+                 "ARC_OMEGA_MAX_RADPS"):
+        value = globals()[name]
+        if not (isinstance(value, (int, float)) and math.isfinite(value) and value >= 0):
+            raise ValueError(f"{name} must be finite and zero or positive")
+    if not PLANNER_LEG_KINDS or not set(PLANNER_LEG_KINDS) <= {"vx", "vy", "vx+vy", "vx+omega"}:
+        raise ValueError('PLANNER_LEG_KINDS must hold some of "vx", "vy", "vx+vy" and "vx+omega"')
+    if not PLANNER_LEG_SHARES or not all(0 < share <= 1 for share in PLANNER_LEG_SHARES):
+        raise ValueError("PLANNER_LEG_SHARES must hold shares in (0, 1]")
+    if not (isinstance(PLANNER_MIXED_ATTEMPTS, int) and PLANNER_MIXED_ATTEMPTS >= 0):
+        raise ValueError("PLANNER_MIXED_ATTEMPTS must be a non-negative integer")
+    if not 0 < PLANNER_ARC_BEARING_MIN_RAD <= PLANNER_ARC_BEARING_MAX_RAD < math.pi / 2:
+        raise ValueError("Need 0 < PLANNER_ARC_BEARING_MIN_RAD <= "
+                         "PLANNER_ARC_BEARING_MAX_RAD < pi/2")
     if EDGE_STOP_MARGIN_M is not None and not (
             isinstance(EDGE_STOP_MARGIN_M, (int, float)) and EDGE_STOP_MARGIN_M >= 0):
         raise ValueError("EDGE_STOP_MARGIN_M must be None or a non-negative number")
-    for name in ("MODEL_GAIN_VX_POS", "MODEL_GAIN_OMEGA_POS", "MODEL_GAIN_OMEGA_NEG"):
+    for name in ("MODEL_GAIN_VX_POS", "MODEL_GAIN_VY_POS", "MODEL_GAIN_VY_NEG",
+                 "MODEL_GAIN_OMEGA_POS", "MODEL_GAIN_OMEGA_NEG",
+                 "MODEL_GAIN_DIAG_VX", "MODEL_GAIN_DIAG_VY_POS", "MODEL_GAIN_DIAG_VY_NEG",
+                 "MODEL_GAIN_ARC_VX", "MODEL_GAIN_ARC_OMEGA_POS", "MODEL_GAIN_ARC_OMEGA_NEG"):
         value = globals()[name]
         if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
             raise ValueError(f"{name} must be finite and positive")
     # 0 marks a direction the model does not use.
-    for name in ("MODEL_GAIN_VX_NEG", "MODEL_GAIN_VY_POS", "MODEL_GAIN_VY_NEG"):
-        value = globals()[name]
-        if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
-            raise ValueError(f"{name} must be finite and zero or positive")
+    if not (isinstance(MODEL_GAIN_VX_NEG, (int, float)) and math.isfinite(MODEL_GAIN_VX_NEG)
+            and MODEL_GAIN_VX_NEG >= 0):
+        raise ValueError("MODEL_GAIN_VX_NEG must be finite and zero or positive")
     for name in ("MODEL_OFFSET_VX_POS_M", "MODEL_OFFSET_VY_POS_M", "MODEL_OFFSET_VY_NEG_M",
                  "MODEL_OFFSET_OMEGA_POS_RAD", "MODEL_OFFSET_OMEGA_NEG_RAD",
+                 "MODEL_OFFSET_DIAG_VX_M", "MODEL_OFFSET_DIAG_VY_POS_M",
+                 "MODEL_OFFSET_DIAG_VY_NEG_M", "MODEL_OFFSET_ARC_VX_M",
+                 "MODEL_OFFSET_ARC_OMEGA_POS_RAD", "MODEL_OFFSET_ARC_OMEGA_NEG_RAD",
                  "MODEL_WALK_YAW_RAD_PER_M"):
         value = globals()[name]
         if not isinstance(value, (int, float)) or not math.isfinite(value):
