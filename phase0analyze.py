@@ -16,8 +16,8 @@ from types import SimpleNamespace
 from typing import Callable
 
 import config
-from core import (Command, ExecutionTrace, is_in_place_turn, nominal_rollout, process_execution,
-                  trace_execution, validate_commands)
+from core import (Command, ExecutionTrace, is_in_place_turn, motion_kind, nominal_rollout,
+                  process_execution, trace_execution, validate_commands)
 from phase0 import pilot_dirs, reject_old_phase0
 
 
@@ -31,17 +31,34 @@ class Direction:
     applies: Callable[[Command], bool]
 
 
+# Every gain and offset applies only to segments of its own command kind
+# (core.motion_kind), so it is fitted only through those segments: "+vx" is vx
+# alone, and the vx of a diagonal walk or an arc has its own gain.
 DIRECTIONS = (
     Direction("+vx", "MODEL_GAIN_VX_POS", "MODEL_OFFSET_VX_POS_M", "m",
-              "VX_MAX_MPS", lambda c: c.vx > 0),
+              "VX_MAX_MPS", lambda c: motion_kind(c) == "vx"),
     Direction("+vy", "MODEL_GAIN_VY_POS", "MODEL_OFFSET_VY_POS_M", "m",
-              "VY_MAX_MPS", lambda c: c.vy > 0),
+              "VY_MAX_MPS", lambda c: motion_kind(c) == "vy" and c.vy > 0),
     Direction("-vy", "MODEL_GAIN_VY_NEG", "MODEL_OFFSET_VY_NEG_M", "m",
-              "VY_MAX_MPS", lambda c: c.vy < 0),
+              "VY_MAX_MPS", lambda c: motion_kind(c) == "vy" and c.vy < 0),
     Direction("+omega", "MODEL_GAIN_OMEGA_POS", "MODEL_OFFSET_OMEGA_POS_RAD", "rad",
-              "OMEGA_MAX_RADPS", lambda c: c.omega > 0),
+              "OMEGA_MAX_RADPS", lambda c: motion_kind(c) == "omega" and c.omega > 0),
     Direction("-omega", "MODEL_GAIN_OMEGA_NEG", "MODEL_OFFSET_OMEGA_NEG_RAD", "rad",
-              "OMEGA_MAX_RADPS", lambda c: c.omega < 0),
+              "OMEGA_MAX_RADPS", lambda c: motion_kind(c) == "omega" and c.omega < 0),
+    Direction("vx+vy: vx", "MODEL_GAIN_DIAG_VX", "MODEL_OFFSET_DIAG_VX_M", "m",
+              "DIAG_SPEED_SUM_MAX_MPS", lambda c: motion_kind(c) == "vx+vy"),
+    Direction("vx+vy: +vy", "MODEL_GAIN_DIAG_VY_POS", "MODEL_OFFSET_DIAG_VY_POS_M", "m",
+              "DIAG_SPEED_SUM_MAX_MPS", lambda c: motion_kind(c) == "vx+vy" and c.vy > 0),
+    Direction("vx+vy: -vy", "MODEL_GAIN_DIAG_VY_NEG", "MODEL_OFFSET_DIAG_VY_NEG_M", "m",
+              "DIAG_SPEED_SUM_MAX_MPS", lambda c: motion_kind(c) == "vx+vy" and c.vy < 0),
+    Direction("vx+omega: vx", "MODEL_GAIN_ARC_VX", "MODEL_OFFSET_ARC_VX_M", "m",
+              "ARC_VX_MAX_MPS", lambda c: motion_kind(c) == "vx+omega"),
+    Direction("vx+omega: +omega", "MODEL_GAIN_ARC_OMEGA_POS", "MODEL_OFFSET_ARC_OMEGA_POS_RAD",
+              "rad", "ARC_OMEGA_MAX_RADPS",
+              lambda c: motion_kind(c) == "vx+omega" and c.omega > 0),
+    Direction("vx+omega: -omega", "MODEL_GAIN_ARC_OMEGA_NEG", "MODEL_OFFSET_ARC_OMEGA_NEG_RAD",
+              "rad", "ARC_OMEGA_MAX_RADPS",
+              lambda c: motion_kind(c) == "vx+omega" and c.omega < 0),
 )
 
 
@@ -63,7 +80,7 @@ TERMS = (
     Term("MODEL_TURN_LAG_AFTER_WALK_S", "lag after walk", "s", config.DT_S, 0.0, 0.9*config.DT_S,
          is_in_place_turn),
     Term("MODEL_WALK_YAW_RAD_PER_M", "walk yaw", "rad/m", 0.2, -math.inf, math.inf,
-         lambda c: c.vx > 0),
+         lambda c: motion_kind(c) == "vx"),
 )
 FITTED_NAMES = (tuple(name for d in DIRECTIONS for name in (d.gain, d.offset))
                 + tuple(t.name for t in TERMS))
@@ -83,11 +100,16 @@ def model_from_config() -> dict[str, float]:
     return {name: getattr(config, name) for name in MODEL_NAMES}
 
 
+def boundary_errors(trace: ExecutionTrace, model) -> list[float]:
+    """Distance between robot and model at every segment boundary after the start."""
+    states = nominal_rollout(trace.commands, trace.initial_pose, model)
+    return [math.hypot(actual_x - state[0], actual_y - state[1])
+            for state, (actual_x, actual_y) in zip(states[1:], trace.actual_at_boundaries[1:])]
+
+
 def max_deviation(trace: ExecutionTrace, model) -> float:
     """E of one pilot under `model`: largest boundary distance between robot and model."""
-    states = nominal_rollout(trace.commands, trace.initial_pose, model)
-    return max(math.hypot(actual_x - state[0], actual_y - state[1])
-               for state, (actual_x, actual_y) in zip(states[1:], trace.actual_at_boundaries[1:]))
+    return max(boundary_errors(trace, model))
 
 
 def _quantile(values: list[float], probability: float) -> float:
@@ -100,25 +122,28 @@ def _quantile(values: list[float], probability: float) -> float:
     return ordered[lower] + (position-lower)*(ordered[upper]-ordered[lower])
 
 
-def quantile_e(traces: list[ExecutionTrace], values: dict[str, float],
-               give_up_above: float = math.inf) -> float:
-    """q of the pilots under the model `values`: the PILOT_HIGH_QUANTILE quantile of E.
+def quantile_e(traces: list[ExecutionTrace], values: dict[str, float]) -> float:
+    """q of the pilots under the model `values`: the PILOT_HIGH_QUANTILE quantile of E."""
+    model = SimpleNamespace(**values)
+    return _quantile([max_deviation(trace, model) for trace in traces],
+                     config.PILOT_HIGH_QUANTILE)
 
-    Returns inf as soon as q cannot be below `give_up_above`.
+
+def rms_error(traces: list[ExecutionTrace], values: dict[str, float],
+              give_up_above: float = math.inf) -> float:
+    """Root mean square of every boundary distance of every pilot under the model `values`.
+
+    Returns inf as soon as it cannot be below `give_up_above`.
     """
     model = SimpleNamespace(**values)
-    # q is at least the E ranked just below the quantile position, so it cannot
-    # beat the limit once more pilots than those ranked above it reach the limit.
-    may_reach_limit = len(traces) - 1 - math.floor((len(traces)-1)*config.PILOT_HIGH_QUANTILE)
-    deviations = []
+    count = sum(len(trace.commands) for trace in traces)
+    limit = give_up_above**2 * count
+    total = 0.0
     for trace in traces:
-        deviation = max_deviation(trace, model)
-        if deviation >= give_up_above:
-            may_reach_limit -= 1
-            if may_reach_limit < 0:
-                return math.inf
-        deviations.append(deviation)
-    return _quantile(deviations, config.PILOT_HIGH_QUANTILE)
+        total += sum(error*error for error in boundary_errors(trace, model))
+        if total >= limit:
+            return math.inf
+    return math.sqrt(total / count)
 
 
 def segment_counts(traces: list[ExecutionTrace]) -> dict[str, int]:
@@ -129,12 +154,15 @@ def segment_counts(traces: list[ExecutionTrace]) -> dict[str, int]:
 
 
 def fit(traces: list[ExecutionTrace], rng: random.Random, iterations: int) -> dict[str, float]:
-    """Random search for the gains, offsets, turn lag and walk yaw with the lowest q.
+    """Least squares by random search: the gains, offsets, turn lags and walk yaw
+    with the lowest RMS of all boundary distances between robot and model.
 
-    Starts from the raw model (gain 1, offset 0, no lag, no walk yaw). Every
-    step changes either one direction's gain and offset, or one term, or a
-    random set of the parameters by random amounts, and keeps the change only
-    if q drops. A direction or term no pilot used keeps its config.py values.
+    Every boundary of every pilot counts, so each parameter is pinned by all of
+    its segments rather than by the few worst pilots that set q. Starts from
+    the raw model (gain 1, offset 0, no lag, no walk yaw). Every step changes
+    either one direction's gain and offset, or one term, or a random set of
+    the parameters by random amounts, and keeps the change only if the RMS
+    drops. A direction or term no pilot used keeps its config.py values.
     """
     counts = segment_counts(traces)
     values = model_from_config()
@@ -152,7 +180,7 @@ def fit(traces: list[ExecutionTrace], rng: random.Random, iterations: int) -> di
     if not pairs:
         return values
     free = [parameter for pair in pairs for parameter in pair]
-    best = quantile_e(traces, values)
+    best = rms_error(traces, values)
     for _ in range(iterations):
         step = COARSE_STEP * (FINE_STEP / COARSE_STEP) ** rng.random()
         trial = dict(values)
@@ -164,7 +192,7 @@ def fit(traces: list[ExecutionTrace], rng: random.Random, iterations: int) -> di
                 trial[name] = max(MIN_GAIN, trial[name])
             if name in bounds:
                 trial[name] = min(max(bounds[name][0], trial[name]), bounds[name][1])
-        score = quantile_e(traces, trial, best)
+        score = rms_error(traces, trial, best)
         if score < best:
             values, best = trial, score
     return {name: round(value, DECIMALS) if name in FITTED_NAMES else value
@@ -193,8 +221,10 @@ def analyze() -> None:
         raise RuntimeError(f"No valid pilots in {config.PHASE0_ROOT}"
                            + (f" ({' | '.join(failures)})" if failures else ""))
     pilots = list(traces.values())
+    rms_before = rms_error(pilots, model_from_config())
     q_before = quantile_e(pilots, model_from_config())
     fitted = fit(pilots, random.Random(config.MASTER_RANDOM_SEED), config.PHASE0_FIT_ITERATIONS)
+    rms_fitted = rms_error(pilots, fitted)
     # Everything below uses the fitted model; config.py and its module stay as they are.
     settings = {name: value for name, value in vars(config).items() if name.isupper()}
     fitted_config = SimpleNamespace(**{**settings, **fitted})
@@ -222,6 +252,7 @@ def analyze() -> None:
                          "yaw_offset_rad", "marker_to_body_x_m", "marker_to_body_y_m",
                          *(name.lower() for name in MODEL_NAMES),
                          "vx_max_mps", "vy_max_mps", "omega_max_radps",
+                         "diag_speed_sum_max_mps", "arc_vx_max_mps", "arc_omega_max_radps",
                          "yaw_command_sign", "lateral_command_sign",
                          "robot_radius_m",
                          "workspace_x_min_m", "workspace_x_max_m",
@@ -236,6 +267,8 @@ def analyze() -> None:
                          config.MARKER_TO_BODY_Y_M,
                          *(fitted[name] for name in MODEL_NAMES),
                          config.VX_MAX_MPS, config.VY_MAX_MPS, config.OMEGA_MAX_RADPS,
+                         config.DIAG_SPEED_SUM_MAX_MPS, config.ARC_VX_MAX_MPS,
+                         config.ARC_OMEGA_MAX_RADPS,
                          config.POSITIVE_YAW_COMMAND_SIGN,
                          config.POSITIVE_LATERAL_COMMAND_SIGN,
                          config.ROBOT_RADIUS_M,
@@ -249,20 +282,22 @@ def analyze() -> None:
         f"Phase 0 analysis, {datetime.now():%Y-%m-%d %H:%M}, {len(pilots)} pilot(s)",
         "",
         f"Model per {config.DT_S:g} s segment.",
-        f"Random search ({config.PHASE0_FIT_ITERATIONS} steps) minimizing q, the {quantile_name}:",
-        f"  q with the model now in config.py  {q_before:.3f} m",
-        f"  q with the fitted model            {q:.3f} m",
+        f"Least squares by random search ({config.PHASE0_FIT_ITERATIONS} steps): minimizes",
+        "the RMS of the robot-model distance at every segment boundary of every pilot.",
+        f"  with the model now in config.py  RMS {rms_before:.3f} m, q {q_before:.3f} m",
+        f"  with the fitted model            RMS {rms_fitted:.3f} m, q {q:.3f} m",
+        f"  (q is the {quantile_name})",
         "",
-        "  direction  segments    gain   offset per segment",
+        "  direction         segments    gain   offset per segment",
     ]
     for d in DIRECTIONS:
         note = "" if counts[d.label] else "   (no data: config.py value kept)"
-        lines.append(f"  {d.label:<9}  {counts[d.label]:8d}  {fitted[d.gain]:6.4f}  "
+        lines.append(f"  {d.label:<16}  {counts[d.label]:8d}  {fitted[d.gain]:6.4f}  "
                      f"{fitted[d.offset]:+7.4f} {d.unit}{note}")
-    lines += ["", "  term            segments    value"]
+    lines += ["", "  term              segments    value"]
     for t in TERMS:
         note = "" if counts[t.label] else "   (no data: config.py value kept)"
-        lines.append(f"  {t.label:<14}  {counts[t.label]:8d}  {fitted[t.name]:+7.4f} {t.unit}{note}")
+        lines.append(f"  {t.label:<16}  {counts[t.label]:8d}  {fitted[t.name]:+7.4f} {t.unit}{note}")
     lines += ["", "To use the fitted model, set these lines in config.py:"]
     lines += [f"{name} = {fitted[name]!r}" for name in FITTED_NAMES]
     lines += ["", "With the fitted model:"]

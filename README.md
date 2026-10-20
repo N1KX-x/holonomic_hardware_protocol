@@ -79,16 +79,25 @@ When there are enough pilots:
 python3 phase0analyze.py
 ```
 
-For each of +vx, +vy, -vy, +omega and -omega the nominal model predicts
-`y = gain * x + offset`, where `x` is the motion a command asks for in one
-segment (command x dt, in the robot's frame). Two more terms come from the
+Every segment is one of six commands: standing still, `vx` alone (> 0), `vy`
+alone (`|vy| <= VY_MAX_MPS`), `omega` alone, a diagonal walk `vx + vy`
+(`vx > 0`, `|vx| + |vy| <= DIAG_SPEED_SUM_MAX_MPS`) or an arc `vx + omega`
+(`0 < vx <= ARC_VX_MAX_MPS`, `|omega| <= ARC_OMEGA_MAX_RADPS`).
+For each of +vx, +vy, -vy, +omega and -omega alone, and for the vx, +vy and
+-vy of a diagonal walk and the vx, +omega and -omega of an arc, the nominal
+model predicts `y = gain * x + offset`, where `x` is the motion a command asks
+for in one segment (command x dt, in the robot's frame). Each of these eleven
+gains and offsets applies only to segments of its own command, so it is fitted
+only through those segments: a diagonal walk never uses the gains of `vx` or
+`vy` alone, and they never see a diagonal walk. Two more terms come from the
 Go2's turn-then-walk behaviour: an in-place turn that starts a turn begins
 `MODEL_TURN_LAG_S` late from standstill and `MODEL_TURN_LAG_AFTER_WALK_S` late
-right after walking, and walking forward yaws the robot left by
+right after walking, and walking forward (`vx` alone) yaws the robot left by
 `MODEL_WALK_YAW_RAD_PER_M` per commanded metre. A seeded random search picks
-the five gains, five offsets and these three terms that minimize `q` (the 90 %
-quantile of E over the pilots) and then reports every pilot's E, `q` and `rho`
-with them. The report
+the eleven gains, eleven offsets and these three terms by least squares: they
+minimize the RMS of the robot-model distance at every segment boundary of
+every pilot. It then reports every pilot's E, `q` (the 90 % quantile of E over
+the pilots) and `rho` with them, and how many segments each was fitted on. The report
 is saved as `data/phase0/phase0_analysis.txt` and includes the lines to enter
 in `config.py`; `config.py` itself is not changed. Phase 1 accepts
 `data/phase0/phase0_results.csv` only when its status is `ready` (every saved
@@ -170,12 +179,14 @@ collision checking. The following were changed to match the protocol:
 
 - unicycle `(v, omega)` became full-holonomic `(vx, vy, omega)`;
 - `vx` is never negative: the robot only walks forward and turns to go back;
-- every segment either turns in place (`omega` only) or translates without
-  turning (`vx`, `vy` only);
+- every segment is one allowed command: `vx`, `vy` or `omega` alone, a
+  diagonal walk (`vx + vy`) or an arc (`vx + omega`);
 - with `PLANNER_TURN_THEN_STRAIGHT = True` (the default) plans are polylines:
-  an RRT over positions finds waypoints, the path is shortcut to few corners,
-  and the robot turns in place to face each corner and walks straight to it
-  (`vx` and `omega` only), at a random speed per leg;
+  an RRT over positions finds waypoints and the path is shortcut to few
+  corners. Each leg starts with a random kind from `PLANNER_LEG_KINDS` over a
+  random share of the way (turn, then walk sideways, diagonally or along an
+  arc), then the robot turns in place to face the corner and walks straight
+  to it, at random speeds per leg;
 - variable 0.2–0.5 s commands became exactly `DT_S`;
 - online lidar discovery/replanning was removed because obstacles are virtual;
 - obstacles are inflated by the frozen Phase 0 `rho`;

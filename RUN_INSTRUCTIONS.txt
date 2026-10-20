@@ -28,6 +28,7 @@ publishes velocity commands that the Nova Go2 driver forwards to the robot.
     Experiment values (Phase 0 freezes these; changing them later means
     redoing Phase 0):
     DT_S, T_SEGMENTS, VX_MAX_MPS, VY_MAX_MPS, OMEGA_MAX_RADPS,
+    DIAG_SPEED_SUM_MAX_MPS, ARC_VX_MAX_MPS, ARC_OMEGA_MAX_RADPS,
     TRANSLATIONAL_SPEED_MAX_MPS, GOAL_RADIUS_M, ROBOT_RADIUS_M,
     WORKSPACE_X_MIN_M / X_MAX_M / Y_MIN_M / Y_MAX_M
 
@@ -126,8 +127,12 @@ Keep Nova running. Keep someone on the e-stop for every pilot.
     python3 phase0analyze.py
 
     It searches for the gain and offset of each direction (+vx, +vy, -vy,
-    +omega, -omega), the two turn lags and the walking yaw that minimize q, and
-    prints them, E of every pilot, q and rho. The same text is saved as
+    +omega, -omega alone; vx, +vy, -vy of a diagonal walk vx+vy; vx, +omega,
+    -omega of an arc vx+omega), the two turn lags and the walking yaw by
+    least squares (lowest RMS robot-model distance over every segment
+    boundary of every pilot), and prints them, E of every pilot, q and rho. Each gain and
+    offset is fitted only through segments of its own command; the report
+    lists how many segments that was. The same text is saved as
     data/phase0/phase0_analysis.txt. It does NOT change config.py: to use
     the numbers, copy the MODEL_* lines from the text file into config.py. You can collect more pilots and run it
     again at any time; it always fits from scratch.

@@ -75,6 +75,27 @@ def _calibrated_rate(value: float, dt: float, gain: float, offset: float) -> flo
     return value*gain + offset/dt if value else 0.0
 
 
+# Which axes a command moves -> its kind. Anything else is not allowed.
+_KINDS = {
+    (False, False, False): "stop",
+    (True, False, False): "vx",
+    (False, True, False): "vy",
+    (False, False, True): "omega",
+    (True, True, False): "vx+vy",
+    (True, False, True): "vx+omega",
+}
+
+
+def motion_kind(command: Command) -> str | None:
+    """The command's kind: stop, vx, vy, omega, vx+vy or vx+omega; None for any other.
+
+    vx is never negative, and vy and omega never go together.
+    """
+    if command.vx < 0:
+        return None
+    return _KINDS.get((command.vx != 0, command.vy != 0, command.omega != 0))
+
+
 def is_in_place_turn(command: Command | None) -> bool:
     return command is not None and command.omega != 0 and command.vx == 0 and command.vy == 0
 
@@ -107,16 +128,40 @@ def nominal_step(x: float, y: float, theta: float, command: Command, cfg,
     its command: over a whole segment the modelled motion along that axis is
     gain * commanded motion + offset. Backward vx has a gain only.
 
+    A diagonal walk ("vx+vy") and an arc ("vx+omega") have their own gains and
+    offsets (MODEL_*_DIAG_* and MODEL_*_ARC_*); they never use the ones for a
+    single axis, and the single-axis ones never apply to them.
+
     Two more terms come from the 2026-10-14 turn-then-walk pilots:
     - An in-place turn that starts a turn (`previous`, the command before this
       one, is not an in-place turn the same way) only begins MODEL_TURN_LAG_S
       into the segment from standstill, or MODEL_TURN_LAG_AFTER_WALK_S after
       moving. None as `previous` means the robot was standing still.
-    - Walking forward also yaws the robot by MODEL_WALK_YAW_RAD_PER_M per metre
-      of commanded forward motion (the Go2 curves left).
+    - Walking forward (vx alone) also yaws the robot by
+      MODEL_WALK_YAW_RAD_PER_M per metre of commanded forward motion (the Go2
+      curves left).
     """
     dt = command.dt
     elapsed = max(0.0, (dt if duration is None else duration) - turn_lag(command, previous, cfg))
+    kind = motion_kind(command)
+    if kind == "vx+vy":
+        vx = _calibrated_rate(command.vx, dt, cfg.MODEL_GAIN_DIAG_VX, cfg.MODEL_OFFSET_DIAG_VX_M)
+        if command.vy > 0:
+            vy = _calibrated_rate(command.vy, dt, cfg.MODEL_GAIN_DIAG_VY_POS,
+                                  cfg.MODEL_OFFSET_DIAG_VY_POS_M)
+        else:
+            vy = _calibrated_rate(command.vy, dt, cfg.MODEL_GAIN_DIAG_VY_NEG,
+                                  cfg.MODEL_OFFSET_DIAG_VY_NEG_M)
+        return step_holonomic(x, y, theta, vx, vy, 0.0, elapsed)
+    if kind == "vx+omega":
+        vx = _calibrated_rate(command.vx, dt, cfg.MODEL_GAIN_ARC_VX, cfg.MODEL_OFFSET_ARC_VX_M)
+        if command.omega > 0:
+            omega = _calibrated_rate(command.omega, dt, cfg.MODEL_GAIN_ARC_OMEGA_POS,
+                                     cfg.MODEL_OFFSET_ARC_OMEGA_POS_RAD)
+        else:
+            omega = _calibrated_rate(command.omega, dt, cfg.MODEL_GAIN_ARC_OMEGA_NEG,
+                                     cfg.MODEL_OFFSET_ARC_OMEGA_NEG_RAD)
+        return step_holonomic(x, y, theta, vx, 0.0, omega, elapsed)
     if command.vx >= 0:
         vx = _calibrated_rate(command.vx, dt, cfg.MODEL_GAIN_VX_POS, cfg.MODEL_OFFSET_VX_POS_M)
     else:
@@ -161,10 +206,21 @@ def validate_commands(commands: Iterable[Command], cfg, require_main_horizon: bo
             raise ValueError(f"Segment {expected} duration must be positive")
         if require_main_horizon and abs(command.dt - cfg.DT_S) > 1e-9:
             raise ValueError(f"Segment {expected} must use DT_S={cfg.DT_S}")
+        kind = motion_kind(command)
+        if kind is None:
+            raise ValueError(f"Segment {expected} is not an allowed command (vx > 0, vy or "
+                             "omega alone, vx+vy or vx+omega)")
         if abs(command.vx) > cfg.VX_MAX_MPS or abs(command.vy) > cfg.VY_MAX_MPS:
             raise ValueError(f"Segment {expected} exceeds translation component limit")
         if abs(command.omega) > cfg.OMEGA_MAX_RADPS:
             raise ValueError(f"Segment {expected} exceeds yaw-rate limit")
+        if kind == "vx+vy" and abs(command.vx) + abs(command.vy) > cfg.DIAG_SPEED_SUM_MAX_MPS + 1e-9:
+            raise ValueError(f"Segment {expected} exceeds diagonal limit |vx|+|vy| <= "
+                             f"{cfg.DIAG_SPEED_SUM_MAX_MPS:g}")
+        if kind == "vx+omega" and (command.vx > cfg.ARC_VX_MAX_MPS + 1e-9
+                                   or abs(command.omega) > cfg.ARC_OMEGA_MAX_RADPS + 1e-9):
+            raise ValueError(f"Segment {expected} exceeds arc limits vx <= "
+                             f"{cfg.ARC_VX_MAX_MPS:g}, |omega| <= {cfg.ARC_OMEGA_MAX_RADPS:g}")
         combined = cfg.TRANSLATIONAL_SPEED_MAX_MPS
         if combined is not None and math.hypot(command.vx, command.vy) > combined + 1e-12:
             raise ValueError(f"Segment {expected} exceeds combined translation limit")
