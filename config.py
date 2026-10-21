@@ -21,7 +21,7 @@ MAX_TRACKING_GAP_S = 0.20
 EDGE_STOP_MARGIN_M = None
 LIVE_TRACKING_TIMEOUT_S = 0.50
 START_POSITION_TOLERANCE_M = 0.15
-START_HEADING_TOLERANCE_RAD = 0.17  # about 10 degrees
+START_HEADING_TOLERANCE_RAD = 0.17  
 
 
 # ROS / Unitree Go2
@@ -74,42 +74,40 @@ TRANSLATIONAL_SPEED_MAX_MPS = None
 
 #Tuning parameters for gain and offset---------------------------------------
 #Vx Setting--------
-MODEL_GAIN_VX_POS = 1.05     # forward
-MODEL_OFFSET_VX_POS_M = 0.0
+MODEL_GAIN_VX_POS = 0.8776   # forward
+MODEL_OFFSET_VX_POS_M = 0.1309
 MODEL_GAIN_VX_NEG = 0.0      # backward set
 
 #Vy seeting--------
-MODEL_GAIN_VY_POS = 1.00     # sideways to the robot's left
-MODEL_OFFSET_VY_POS_M = 0.0
+MODEL_GAIN_VY_POS = 1.1296   # sideways to the robot's left
+MODEL_OFFSET_VY_POS_M = -0.0443
 MODEL_GAIN_VY_NEG = 0.74     # sideways to the robot's right
 MODEL_OFFSET_VY_NEG_M = 0.0
 
 #Omega Seeting------------
-MODEL_GAIN_OMEGA_POS = 0.70  # turning left (counterclockwise)
-MODEL_OFFSET_OMEGA_POS_RAD = 0.0
-MODEL_GAIN_OMEGA_NEG = 0.70  # turning right (clockwise)
-MODEL_OFFSET_OMEGA_NEG_RAD = 0.0
+MODEL_GAIN_OMEGA_POS = 0.6094  # turning left (counterclockwise)
+MODEL_OFFSET_OMEGA_POS_RAD = 0.002
+MODEL_GAIN_OMEGA_NEG = 0.6907  # turning right (clockwise)
+MODEL_OFFSET_OMEGA_NEG_RAD = 0.0355
 
 #Diagnal Velocity Setting------
-MODEL_GAIN_DIAG_VX = 1.05
-MODEL_OFFSET_DIAG_VX_M = 0.0
-MODEL_GAIN_DIAG_VY_POS = 1.00  # diagonal to the robot's left
-MODEL_OFFSET_DIAG_VY_POS_M = 0.0
-MODEL_GAIN_DIAG_VY_NEG = 0.74  # diagonal to the robot's right
-MODEL_OFFSET_DIAG_VY_NEG_M = 0.0
+MODEL_GAIN_DIAG_VX = 0.7826
+MODEL_OFFSET_DIAG_VX_M = 0.0638
+MODEL_GAIN_DIAG_VY_POS = 0.7514  # diagonal to the robot's left
+MODEL_OFFSET_DIAG_VY_POS_M = 0.0551
+MODEL_GAIN_DIAG_VY_NEG = 0.8514  # diagonal to the robot's right
+MODEL_OFFSET_DIAG_VY_NEG_M = -0.0129
 
 #Arc Seeting
-MODEL_GAIN_ARC_VX = 1.05
-MODEL_OFFSET_ARC_VX_M = 0.0
-MODEL_GAIN_ARC_OMEGA_POS = 0.80  # arcing left
-MODEL_OFFSET_ARC_OMEGA_POS_RAD = 0.0
-MODEL_GAIN_ARC_OMEGA_NEG = 0.80  # arcing right
-MODEL_OFFSET_ARC_OMEGA_NEG_RAD = 0.0
-
-
-MODEL_TURN_LAG_S = 0.30
-MODEL_TURN_LAG_AFTER_WALK_S = 0.10
-MODEL_WALK_YAW_RAD_PER_M = 0.05
+MODEL_GAIN_ARC_VX = 1.0321
+MODEL_OFFSET_ARC_VX_M = 0.0195
+MODEL_GAIN_ARC_OMEGA_POS = 0.7523  # arcing left
+MODEL_OFFSET_ARC_OMEGA_POS_RAD = -0.0069
+MODEL_GAIN_ARC_OMEGA_NEG = 0.6521  # arcing right
+MODEL_OFFSET_ARC_OMEGA_NEG_RAD = 0.0179
+MODEL_TURN_LAG_S = 0.2088
+MODEL_TURN_LAG_AFTER_WALK_S = 0.0
+MODEL_WALK_YAW_RAD_PER_M = 0.0444
 
 
 
